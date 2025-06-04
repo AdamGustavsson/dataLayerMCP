@@ -52,7 +52,7 @@ Provide a name (e.g., "DataLayerAccessServer") and version (e.g., "0.1.0").
 
 
 The server should listen for MCP client connections. For MVP, a StdioServerTransport can be considered for simplicity if the LLM client runs locally and supports it, or a basic HTTP transport if that's simpler for the LLM client integration. The primary focus is the tool logic and WebSocket communication with the extension. The MCP specification mentions Streamable HTTP as a standard transport.15
-The server will also host a WebSocket server on a distinct port (e.g., localhost:3001) to communicate with the Chrome extension. This is separate from the main MCP transport. This distinction is important because the MCP server's primary interface for the LLM might be HTTP, while its internal communication channel with the extension needs the bidirectional capabilities of WebSockets for the server to initiate requests to the extension.10
+The server will also host a WebSocket server on a distinct port (e.g., localhost:57321) to communicate with the Chrome extension. This is separate from the main MCP transport. This distinction is important because the MCP server's primary interface for the LLM might be HTTP, while its internal communication channel with the extension needs the bidirectional capabilities of WebSockets for the server to initiate requests to the extension.10
 3.3. Tool Definition: getDataLayer()
 The server MUST expose a single MCP tool named getDataLayer.
 Input Parameters: The tool will take no input parameters from the LLM for this MVP.
@@ -102,7 +102,7 @@ If the payload contains an error, return that error to the LLM.
 
 If the timeout occurs, return a timeout error to the LLM.
 The use of a requestId is crucial for correlating requests and responses, especially if the system were to handle concurrent requests in the future, though for MVP, single request handling is sufficient.3.5. WebSocket Server for Extension Communication
-The MCP server application will also run a WebSocket server (e.g., using the ws library on localhost:3001).
+The MCP server application will also run a WebSocket server (e.g., using the ws library on localhost:57321).
 Connection Handling:
 
 When a new WebSocket connection is established by the Chrome extension:
@@ -158,7 +158,7 @@ B. WebSocket Client Logic:
 connectToMcServer() function:
 
 If webSocket is already open, do nothing.
-Attempt to create a new WebSocket connection to ws://localhost:3001 (or configured address).
+Attempt to create a new WebSocket connection to ws://localhost:57321 (or configured address).
 onopen: Log success. Send an initial status message if a tab is already attached. Start keep-alive mechanism.
 onmessage:
 
@@ -398,7 +398,7 @@ Table 3: Message Format: Popup Script to Background Script
 Message Type (from popup.js)Payload FieldsResponse from Background (to popup.js)DescriptionGET_ATTACHMENT_STATUS(none)`{ attachedTabInfo: {id, title} \null }`ATTACH_TAB{ tabId: number, title: string }{ attachedTabInfo: {id, title} }Instructs service worker to attach to the specified tab.DETACH_TAB(none){ attachedTabInfo: null }Instructs service worker to detach from any currently attached tab.The popup provides the sole user interaction point for the core functionality of tab attachment. Its simplicity and clarity are paramount for a good user experience.8 The activeTab permission is implicitly used here when the popup queries for the active tab to attach.5. Communication Protocol (Extension Background Script <> MCP Server)5.1. Choice of Protocol: WebSocketsAs established, WebSockets are chosen for communication between the extension's service worker and the MCP server. This is primarily because the getDataLayer() flow requires the MCP server to initiate a request for data from the extension after an LLM calls the tool.13 WebSockets provide a persistent, bidirectional channel ideal for such server-initiated messages once the client (extension) establishes the connection.10The extension's service worker will act as a WebSocket client, connecting to a WebSocket server hosted by the local MCP application.5.2. WebSocket Connection Management
 Extension Client (service_worker.js):
 
-Initiation: On extension startup (chrome.runtime.onStartup) and potentially after a tab is successfully attached, the service worker will attempt to establish a WebSocket connection to the MCP server (e.g., ws://localhost:3001). The port for WebSocket communication (e.g., 3001) should be distinct from any HTTP port the MCP server might use for its primary MCP interface (e.g., 3000). This separation simplifies server routing and configuration.
+Initiation: On extension startup (chrome.runtime.onStartup) and potentially after a tab is successfully attached, the service worker will attempt to establish a WebSocket connection to the MCP server (e.g., ws://localhost:57321). The port for WebSocket communication (e.g., 57321) should be distinct from any HTTP port the MCP server might use for its primary MCP interface (e.g., 3000). This separation simplifies server routing and configuration.
 Retry Logic: If the initial connection fails (e.g., MCP server not yet running), implement a simple exponential backoff retry mechanism (e.g., retry after 2s, 4s, 8s, maxing out at 30s, then periodically retrying).
 Event Handlers:
 
@@ -413,7 +413,7 @@ Keep-Alive: To maintain the service worker's active state in Manifest V3 and pre
 
 MCP Server (Node.js/TypeScript using ws library):
 
-Server Setup: Instantiate a WebSocketServer from the ws package, listening on the designated port (e.g., 3001).17
+Server Setup: Instantiate a WebSocketServer from the ws package, listening on the designated port (e.g., 57321).17
 Connection Handling:
 
 On a new 'connection' event:
@@ -459,7 +459,7 @@ Critical Note to Developer: This approach is adopted for MVP simplicity to focus
 
 
 6.2. Security between Extension and Localhost MCP Server
-A. Host Permissions: The Chrome extension's manifest.json will declare a specific host_permissions entry for the MCP server's WebSocket endpoint (e.g., "ws://localhost:3001/").34 This strictly limits the extension's ability to initiate network connections to only this predefined local address and port, preventing it from communicating with arbitrary network locations.
+A. Host Permissions: The Chrome extension's manifest.json will declare a specific host_permissions entry for the MCP server's WebSocket endpoint (e.g., "ws://localhost:57321/").34 This strictly limits the extension's ability to initiate network connections to only this predefined local address and port, preventing it from communicating with arbitrary network locations.
 B. CORS (Cross-Origin Resource Sharing):
 
 CORS is primarily an HTTP-header based mechanism. Since WebSockets are used for the primary communication channel between the extension and the MCP server, traditional HTTP CORS headers on the MCP server for this specific path (/ws if applicable) are less directly relevant once the WebSocket handshake is complete.

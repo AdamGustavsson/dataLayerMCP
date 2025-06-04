@@ -1,0 +1,24 @@
+{
+  "manifest_version": 3,
+  "name": "MCP DataLayer Access Extension (MVP)",
+  "version": "0.1.0",
+  "description": "Allows an MCP server to access the dataLayer of an attached browser tab.",
+  "permissions": [
+    "activeTab",
+    "scripting",
+    "storage"
+  ],
+  "host_permissions": [
+    "ws://localhost:57321/",
+    "<all_urls>",
+    "ws://localhost:57321/"
+  ],
+  "background": {
+    "service_worker": "service_worker.js"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Manage DataLayer Tab Attachment"
+  },
+  "minimum_chrome_version": "116"
+} 
