@@ -1,12 +1,21 @@
 # dataLayer MCP – MVP
 
-This repository contains an MVP implementation that lets a Large Language Model (LLM) retrieve `window.dataLayer` from a user-selected browser tab using the Model Context Protocol (MCP).
+This repository contains an MVP implementation that lets a Large Language Model (LLM) retrieve `window.dataLayer` and monitor GA4 hits from a user-selected browser tab using the Model Context Protocol (MCP).
 
 Components
 -----------
 
-1. **MCP Server (Node + TypeScript)** – local process exposing a single MCP tool `getDataLayer()`. Communicates with the Chrome extension via WebSocket (`ws://localhost:57321`).
-2. **Chrome Extension (Manifest V3)** – lets the user attach/detach a tab and, on request, reads that tab's `window.dataLayer` and returns it to the server.
+1. **MCP Server (Node + TypeScript)** – local process exposing three MCP tools:
+   - `getDataLayer()` – captures the current contents of `window.dataLayer`
+   - `getGa4Hits()` – returns all GA4 tracking events recorded from the current page (includes both direct Google Analytics requests and server-side tracking)
+   - `getMetaPixelHits()` – returns all Meta Pixel (Facebook Pixel) tracking events recorded from the current page (includes both direct Facebook requests and server-side tracking)
+   
+   Communicates with the Chrome extension via WebSocket (`ws://localhost:57321`).
+
+2. **Chrome Extension (Manifest V3)** – lets the user attach/detach a tab and provides:
+   - Access to the tab's `window.dataLayer` 
+   - Automatic monitoring and recording of GA4 network requests
+   - Fresh recording per page navigation
 
 Quick start
 -----------
@@ -31,15 +40,33 @@ Manual end-to-end test
 ----------------------
 
 1. **Attach a tab**  
-   • Navigate to any site that defines `window.dataLayer` (e.g. a page using Google Tag Manager).  
+   • Navigate to any site that defines `window.dataLayer` and/or uses Google Analytics 4 (e.g. a page with GTM or GA4 tracking).  
    • Click the extension icon → **Attach**. The popup should now show "Attached to: <page title>".
-2. **Run a sample request**  
+
+2. **Test dataLayer access**  
    In a separate terminal session:
    ```bash
    echo '{ "tool": "getDataLayer", "args": {} }' | npm run start
    ```
-   (Replace with your actual MCP client flow.) The server should output the dataLayer JSON or an error.
-3. **Observe logs**  
+   The server should output the dataLayer JSON or an error.
+
+3. **Test GA4 hits monitoring**  
+   • Perform some actions on the attached page (clicks, navigation, etc.) to trigger GA4 events.
+   • Run the GA4 hits tool:
+   ```bash
+   echo '{ "tool": "getGa4Hits", "args": {} }' | npm run start  
+   ```
+   The server should output an array of recorded GA4 hits with event names, parameters, and timestamps. This includes both direct Google Analytics requests and server-side tracking endpoints that contain GA4 data.
+
+4. **Test Meta Pixel hits monitoring**
+   • Perform some actions on the attached page (clicks, purchases, etc.) to trigger Meta Pixel events.
+   • Run the Meta Pixel hits tool:
+   ```bash
+   echo '{ "tool": "getMetaPixelHits", "args": {} }' | npm run start
+   ```
+   The server should output an array of recorded Meta Pixel hits with event names, pixel IDs, custom data, and timestamps. This includes both direct Facebook Pixel requests and server-side Conversions API tracking.
+
+5. **Observe logs**  
    • Server console will show request / response and WebSocket connection messages.  
    • Extension's background service-worker logs can be viewed in `chrome://extensions/` → *Service Worker* → **Inspect**.
 
@@ -82,23 +109,28 @@ You can keep using `npm run dev` during development, but the compiled file makes
 
 Pick the guide that matches your editor.
 
-#### a) Cursor (`.cursor/mcp.json`)
+#### a) Cursor (Global Configuration)
 
-Create (or edit) `.cursor/mcp.json` in the repo root:
+Open Cursor Settings → **MCP Servers** (or manually edit the global MCP config file), and add:
 
 ```json
 {
   "mcpServers": {
-    {
     "dataLayerMCP": {
-        "command": "node",
-        "args": ["dist/server/src/index.js"]
-         }
+      "command": "node",
+      "args": ["/absolute/path/to/your/dataLayerMCP/dist/server/src/index.js"]
     }
+  }
 }
 ```
 
-Save the file, then **reload the chat panel**.  Cursor will detect the new server, start it automatically, and a tool named `mcp_dataLayerMCP_getDataLayer` will appear in the tool list.
+**Important**: Replace `/absolute/path/to/your/dataLayerMCP/` with the actual full path to where you cloned this repository.
+
+For example:
+- **macOS/Linux**: `"/Users/yourname/Documents/code/dataLayerMCP/dist/server/src/index.js"`
+- **Windows**: `"C:\\Users\\yourname\\Documents\\code\\dataLayerMCP\\dist\\server\\src\\index.js"`
+
+Save the configuration, then **restart Cursor**. The server will be globally available across all projects, and tools named `mcp_dataLayerMCP_getDataLayer`, `mcp_dataLayerMCP_getGa4Hits`, and `mcp_dataLayerMCP_getMetaPixelHits` will appear in the tool list for any chat session.
 
 #### b) VS Code + GitHub Copilot Chat (`.vscode/mcp.json`)
 
@@ -116,18 +148,27 @@ Create `.vscode/mcp.json`:
 }
 ```
 
-VS Code will show a **Start** code-lens at the top of the JSON — click it to launch the server and discover the tool.  Switch Copilot Chat to *Agent* mode ➜ click the **tools** icon to verify `dataLayerMCP` is listed.
+VS Code will show a **Start** code-lens at the top of the JSON — click it to launch the server and discover the tools.  Switch Copilot Chat to *Agent* mode ➜ click the **tools** icon to verify `dataLayerMCP` is listed.
 
 > 🔍  JetBrains, Eclipse, or Xcode users can use the same JSON under `mcp.json` in the IDE-specific settings pane — just copy the `servers` block above.
 
-### 3  Use the tool
+### 3  Use the tools
 
-1. Open or reload the IDE chat window.
-2. In Agent mode, ask something like "What is the dataLayer contents?"
+1. Open any project in Cursor (the global MCP server will be available across all projects).
+2. In the chat panel, ask questions like:
+   - **DataLayer**: "What is the dataLayer contents?" or "Run the getDataLayer tool"
+   - **GA4 Hits**: "Show me the GA4 hits" or "What GA4 events have been recorded?"
+   - **Meta Pixel Hits**: "Show me the Meta Pixel hits" or "What Facebook Pixel events have been fired?"
 3. Make sure the Chrome extension is attached to the tab you want to inspect — the JSON response will appear in Chat.
-Cobine with for example BrowserMCP to the the agent also control the page by clicking around and check the datalayer for changes 
 
-That's it — you now have one-click, LLM-accessible access to any page's `window.dataLayer` right from your editor!
+**Available Tools:**
+- `getDataLayer` - Captures current `window.dataLayer` contents
+- `getGa4Hits` - Returns array of GA4 tracking events from current page (resets on page navigation)
+- `getMetaPixelHits` - Returns array of Meta Pixel tracking events from current page (resets on page navigation)
 
-This MCP server includes a Chrome extension that communicates with the server and extracts `window.dataLayer` from the browser, then forwards it to the MCP server for AI access. The extension communicates with the extension via WebSocket (`ws://localhost:57321`).
+**Pro tip**: Combine with BrowserMCP to have the agent control the page by clicking around and check the dataLayer changes, GA4 events, and Meta Pixel events being fired!
+
+That's it — you now have global, one-click, LLM-accessible access to any page's `window.dataLayer`, GA4 tracking events, and Meta Pixel tracking events from any Cursor project!
+
+This MCP server includes a Chrome extension that communicates with the server, extracts `window.dataLayer` from the browser, monitors GA4 and Meta Pixel network requests, and forwards all data to the MCP server for AI access. The extension communicates with the server via WebSocket (`ws://localhost:57321`).
 

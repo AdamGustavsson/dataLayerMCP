@@ -39,6 +39,102 @@ Track progress by checking items as they are completed.
 - [x] Implement `popup.js` messaging with service worker
 - [x] Update UI based on attachment status
 
+## GA4 Hits Recording Tool
+### Phase 1: Server-Side Implementation
+- [x] Add GA4 hits tool registration to MCP server (`server/src/index.ts`)
+- [x] Add GA4 message type constants (`REQUEST_GA4_HITS`, `GA4_HITS_RESPONSE`)
+- [x] Implement GA4 hits request logic (copy/modify from getDataLayer)
+- [x] Add GA4 response handler in WebSocket message handler
+
+### Phase 2: Chrome Extension Backend
+- [x] Add GA4 storage structure (ga4HitsPerTab Map) to service worker
+- [x] Add page navigation listener to clear hits on page changes
+- [x] Add GA4 request handler case in message switch statement
+- [x] Implement handleGetGa4HitsRequest function
+
+### Phase 3: Network Request Monitoring
+- [x] Add webRequest listeners for GA4 endpoints (POST and GET)
+- [x] Implement handleGa4Request and handleGa4GetRequest functions
+- [x] Implement GA4 payload parsing functions
+- [x] Add server-side GA4 detection for custom endpoints
+- [x] Implement content-based GA4 detection (GET and POST)
+
+### Phase 4: Manifest Permissions
+- [x] Add webRequest permission to manifest.json
+- [x] Add GA4 host permissions (simplified with wildcards)
+
+### Phase 5: Testing and Documentation
+- [x] Update README.md with GA4 hits tool documentation
+- [x] Test GA4 hits recording with real GA4 implementation
+- [x] Verify server-side tracking detection works
+- [x] Optimize to remove POST request noise (GET only)
+
+### Phase 6: Server-Side GA4 Enhancement
+- [x] Expand detection to include regional GA4 endpoints
+- [x] Implement content-based detection for any endpoint
+- [x] Add support for Google Tag Manager Server-side (sGTM)
+- [x] Test with real server-side GA4 tracking
+
+## Meta Pixel Tracking Tool
+### Phase 1: Server-Side Implementation
+- [ ] Add Meta Pixel tool registration to MCP server (`server/src/index.ts`)
+- [ ] Add Meta Pixel message type constants (`REQUEST_META_PIXEL_HITS`, `META_PIXEL_HITS_RESPONSE`)
+- [ ] Implement Meta Pixel hits request logic (similar to getGa4Hits)
+- [ ] Add Meta Pixel response handler in WebSocket message handler
+
+### Phase 2: Chrome Extension Backend
+- [ ] Add Meta Pixel storage structure (metaPixelHitsPerTab Map) to service worker
+- [ ] Add Meta Pixel request handler case in message switch statement
+- [ ] Implement handleGetMetaPixelHitsRequest function
+- [ ] Ensure page navigation clears Meta Pixel hits on page changes
+
+### Phase 3: Network Request Monitoring
+- [ ] Add webRequest listeners for Facebook endpoints (`facebook.com/tr`, `www.facebook.com/tr`)
+- [ ] Implement handleMetaPixelRequest function for direct Facebook requests
+- [ ] Extend server-side detection to identify Meta Pixel patterns in any endpoint
+- [ ] Add Meta Pixel detection to existing handlePotentialServerSideGA4 function
+
+### Phase 4: Meta Pixel Parameter Detection
+- [ ] Implement detectMetaPixelInUrl function for GET request parameters
+- [ ] Implement detectMetaPixelInRequestBody function for POST request payloads
+- [ ] Create isMetaPixelPayload function to identify Meta Pixel indicators
+- [ ] Define Meta Pixel parameter patterns (pixel ID, event names, fb_* parameters)
+
+### Phase 5: Data Parsing and Extraction
+- [ ] Implement Meta Pixel ID extraction (numeric format validation)
+- [ ] Parse standard Meta Pixel events (PageView, Purchase, AddToCart, Lead, etc.)
+- [ ] Extract custom data parameters (content_ids, value, currency, etc.)
+- [ ] Parse user data parameters (hashed email, phone, names)
+- [ ] Handle both URL-encoded and JSON payload formats
+
+### Phase 6: Response Format Implementation
+- [ ] Design Meta Pixel hit object structure with pixel-specific fields
+- [ ] Add pixelId field extraction and validation
+- [ ] Implement customData and userData object parsing
+- [ ] Add serverSide flag to distinguish client vs server-side tracking
+- [ ] Ensure consistent timestamp and tabId tracking
+
+### Phase 7: Testing and Documentation
+- [ ] Update README.md to document Meta Pixel tool alongside GA4 tool
+- [ ] Test with real Meta Pixel implementations (client-side tracking)
+- [ ] Test with Facebook Conversions API (server-side tracking)
+- [ ] Validate e-commerce tracking event capture
+- [ ] Test custom event detection and parsing
+
+### Phase 8: Advanced Features (Optional)
+- [ ] Implement Meta Pixel event classification (standard vs custom events)
+- [ ] Add privacy compliance detection (hashed data, Limited Data Use)
+- [ ] Implement cross-platform correlation with GA4 events
+- [ ] Add Meta Pixel version detection and compatibility handling
+- [ ] Create event frequency and timing analysis
+
+### Phase 9: Integration and Polish
+- [ ] Update manifest.json permissions for Facebook domains
+- [ ] Add error handling for malformed Meta Pixel requests
+- [ ] Implement rate limiting to prevent performance issues
+- [ ] Add Meta Pixel specific logging and debugging
+- [ ] Create comprehensive test suite for various Meta Pixel scenarios
+
 ## Testing & Validation
 - [ ] Manual test end-to-end flow retrieving dataLayer from a site
 - [x] Add `npm` script to build & reload extension in Chrome for dev (server dev & extension manual reload)

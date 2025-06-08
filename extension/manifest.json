@@ -6,12 +6,18 @@
   "permissions": [
     "activeTab",
     "scripting",
-    "storage"
+    "storage",
+    "webRequest"
   ],
   "host_permissions": [
     "ws://localhost:57321/",
     "<all_urls>",
-    "ws://localhost:57321/"
+    "ws://localhost:57321/",
+    "https://www.google-analytics.com/*",
+    "https://analytics.google.com/*",
+    "https://*.analytics.google.com/*",
+    "https://www.facebook.com/*",
+    "https://facebook.com/*"
   ],
   "background": {
     "service_worker": "service_worker.js"

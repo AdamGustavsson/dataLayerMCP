@@ -247,6 +247,312 @@ mcpServer.tool(
   },
 );
 
+mcpServer.tool(
+  "getGa4Hits",
+  "Get all GA4 hits (network requests) recorded from the current page. Recording is automatic and resets on page navigation.",
+  {},
+  async (): Promise<any> => {
+    const socket = connectionState.socket;
+    
+    // Enhanced connection checking
+    if (!socket) {
+      return {
+        content: [
+          { 
+            type: "text", 
+            text: "Chrome extension is not connected. Please ensure the extension is installed and a tab is attached.",
+            _meta: { isError: true, connectionState: "no_socket" }
+          },
+        ],
+        isError: true,
+      } as any;
+    }
+    
+    if (socket.readyState !== WebSocket.OPEN) {
+      return {
+        content: [
+          { 
+            type: "text", 
+            text: `Chrome extension connection is not ready (state: ${socket.readyState}). Please try again in a moment.`,
+            _meta: { isError: true, connectionState: "not_open" }
+          },
+        ],
+        isError: true,
+      } as any;
+    }
+    
+    if (!connectionState.isHealthy) {
+      logWarn("Attempting getGa4Hits on potentially unhealthy connection");
+    }
+
+    const requestId = uuidv4();
+    const payload = { type: "REQUEST_GA4_HITS", requestId, timestamp: Date.now() } as const;
+    
+    if (!wsSend(socket, payload)) {
+      return {
+        content: [
+          { 
+            type: "text", 
+            text: "Failed to send request to extension. Connection may be unstable.",
+            _meta: { isError: true, connectionState: "send_failed" }
+          },
+        ],
+        isError: true,
+      } as any;
+    }
+
+    return new Promise<any>((resolve) => {
+      const timeout = setTimeout(() => {
+        cleanup();
+        logWarn(`Request ${requestId} timed out after ${CONNECTION_TIMEOUT}ms`);
+        resolve({
+          content: [
+            {
+              type: "text",
+              text: `Timeout waiting for GA4 hits from extension (${CONNECTION_TIMEOUT}ms). The extension may be busy or disconnected.`,
+              _meta: { isError: true, requestId, connectionState: "timeout" },
+            },
+          ],
+          isError: true,
+        } as any);
+      }, CONNECTION_TIMEOUT);
+
+      function handleMessage(data: RawData) {
+        try {
+          const msg = JSON.parse(data.toString());
+          if (msg.type === "GA4_HITS_RESPONSE" && msg.requestId === requestId) {
+            cleanup();
+            connectionState.lastActivity = Date.now();
+            
+            if (msg.payload?.error) {
+              logWarn(`Request ${requestId} returned error:`, msg.payload.error);
+              resolve({
+                content: [
+                  { 
+                    type: "text", 
+                    text: String(msg.payload.error), 
+                    _meta: { isError: true, requestId } 
+                  },
+                ],
+                isError: true,
+              } as any);
+            } else {
+              logInfo(`Request ${requestId} completed successfully`);
+              resolve({
+                content: [
+                  {
+                    type: "text",
+                    text: JSON.stringify(msg.payload, null, 2),
+                    _meta: { requestId, hitsCount: msg.payload?.totalHits || 0, pageUrl: msg.payload?.pageUrl }
+                  },
+                ],
+              } as any);
+            }
+          }
+        } catch (err) {
+          logWarn("Received malformed JSON message:", err);
+        }
+      }
+
+      function handleClose() {
+        cleanup();
+        logWarn(`WebSocket closed while waiting for request ${requestId}`);
+        resolve({
+          content: [
+            { 
+              type: "text", 
+              text: "Extension connection closed while processing request.", 
+              _meta: { isError: true, requestId, connectionState: "closed" } 
+            },
+          ],
+          isError: true,
+        } as any);
+      }
+
+      function handleError(error: any) {
+        cleanup();
+        logError(`WebSocket error while waiting for request ${requestId}:`, error);
+        resolve({
+          content: [
+            { 
+              type: "text", 
+              text: "Extension connection error while processing request.", 
+              _meta: { isError: true, requestId, connectionState: "error" } 
+            },
+          ],
+          isError: true,
+        } as any);
+      }
+
+      function cleanup() {
+        clearTimeout(timeout);
+        if (socket) {
+          socket.off("message", handleMessage);
+          socket.off("close", handleClose);
+          socket.off("error", handleError);
+        }
+      }
+
+      socket.on("message", handleMessage);
+      socket.on("close", handleClose);
+      socket.on("error", handleError);
+    });
+  },
+);
+
+mcpServer.tool(
+  "getMetaPixelHits",
+  "Get all Meta Pixel (Facebook Pixel) hits recorded from the current page. Recording is automatic and resets on page navigation.",
+  {},
+  async (): Promise<any> => {
+    const socket = connectionState.socket;
+    
+    // Enhanced connection checking
+    if (!socket) {
+      return {
+        content: [
+          { 
+            type: "text", 
+            text: "Chrome extension is not connected. Please ensure the extension is installed and a tab is attached.",
+            _meta: { isError: true, connectionState: "no_socket" }
+          },
+        ],
+        isError: true,
+      } as any;
+    }
+    
+    if (socket.readyState !== WebSocket.OPEN) {
+      return {
+        content: [
+          { 
+            type: "text", 
+            text: `Chrome extension connection is not ready (state: ${socket.readyState}). Please try again in a moment.`,
+            _meta: { isError: true, connectionState: "not_open" }
+          },
+        ],
+        isError: true,
+      } as any;
+    }
+    
+    if (!connectionState.isHealthy) {
+      logWarn("Attempting getMetaPixelHits on potentially unhealthy connection");
+    }
+
+    const requestId = uuidv4();
+    const payload = { type: "REQUEST_META_PIXEL_HITS", requestId, timestamp: Date.now() } as const;
+    
+    if (!wsSend(socket, payload)) {
+      return {
+        content: [
+          { 
+            type: "text", 
+            text: "Failed to send request to extension. Connection may be unstable.",
+            _meta: { isError: true, connectionState: "send_failed" }
+          },
+        ],
+        isError: true,
+      } as any;
+    }
+
+    return new Promise<any>((resolve) => {
+      const timeout = setTimeout(() => {
+        cleanup();
+        logWarn(`Request ${requestId} timed out after ${CONNECTION_TIMEOUT}ms`);
+        resolve({
+          content: [
+            {
+              type: "text",
+              text: `Timeout waiting for Meta Pixel hits from extension (${CONNECTION_TIMEOUT}ms). The extension may be busy or disconnected.`,
+              _meta: { isError: true, requestId, connectionState: "timeout" },
+            },
+          ],
+          isError: true,
+        } as any);
+      }, CONNECTION_TIMEOUT);
+
+      function handleMessage(data: RawData) {
+        try {
+          const msg = JSON.parse(data.toString());
+          if (msg.type === "META_PIXEL_HITS_RESPONSE" && msg.requestId === requestId) {
+            cleanup();
+            connectionState.lastActivity = Date.now();
+            
+            if (msg.payload?.error) {
+              logWarn(`Request ${requestId} returned error:`, msg.payload.error);
+              resolve({
+                content: [
+                  { 
+                    type: "text", 
+                    text: String(msg.payload.error), 
+                    _meta: { isError: true, requestId } 
+                  },
+                ],
+                isError: true,
+              } as any);
+            } else {
+              logInfo(`Request ${requestId} completed successfully`);
+              resolve({
+                content: [
+                  {
+                    type: "text",
+                    text: JSON.stringify(msg.payload, null, 2),
+                    _meta: { requestId, hitsCount: msg.payload?.totalHits || 0, pageUrl: msg.payload?.pageUrl }
+                  },
+                ],
+              } as any);
+            }
+          }
+        } catch (err) {
+          logWarn("Received malformed JSON message:", err);
+        }
+      }
+
+      function handleClose() {
+        cleanup();
+        logWarn(`WebSocket closed while waiting for request ${requestId}`);
+        resolve({
+          content: [
+            { 
+              type: "text", 
+              text: "Extension connection closed while processing request.", 
+              _meta: { isError: true, requestId, connectionState: "closed" } 
+            },
+          ],
+          isError: true,
+        } as any);
+      }
+
+      function handleError(error: any) {
+        cleanup();
+        logError(`WebSocket error while waiting for request ${requestId}:`, error);
+        resolve({
+          content: [
+            { 
+              type: "text", 
+              text: "Extension connection error while processing request.", 
+              _meta: { isError: true, requestId, connectionState: "error" } 
+            },
+          ],
+          isError: true,
+        } as any);
+      }
+
+      function cleanup() {
+        clearTimeout(timeout);
+        if (socket) {
+          socket.off("message", handleMessage);
+          socket.off("close", handleClose);
+          socket.off("error", handleError);
+        }
+      }
+
+      socket.on("message", handleMessage);
+      socket.on("close", handleClose);
+      socket.on("error", handleError);
+    });
+  },
+);
+
 // ---- WebSocket Server for Extension Communication ----
 function createWebSocketServer(): Promise<void> {
   return new Promise((resolve, reject) => {

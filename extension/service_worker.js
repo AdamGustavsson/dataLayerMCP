@@ -24,6 +24,14 @@ const STORAGE_KEYS = {
   TAB_TITLE: "attachedTabTitle",
 };
 
+// GA4 hits storage - per tab
+const ga4HitsPerTab = new Map(); // tabId -> hits array
+const MAX_HITS_PER_PAGE = 50;
+
+// Meta Pixel hits storage - per tab
+const metaPixelHitsPerTab = new Map(); // tabId -> hits array
+const MAX_META_PIXEL_HITS_PER_PAGE = 50;
+
 // Enhanced logging
 function logInfo(message, ...args) {
   console.log(`[Extension][INFO] ${message}`, ...args);
@@ -145,6 +153,12 @@ async function connectWebSocket() {
       switch (msg.type) {
         case "REQUEST_DATALAYER":
           await handleGetDataLayerRequest(msg.requestId);
+          break;
+        case "REQUEST_GA4_HITS":
+          await handleGetGa4HitsRequest(msg.requestId);
+          break;
+        case "REQUEST_META_PIXEL_HITS":
+          await handleGetMetaPixelHitsRequest(msg.requestId);
           break;
         case "KEEPALIVE_PONG":
           logInfo("Received keepalive pong");
@@ -375,6 +389,98 @@ async function handleGetDataLayerRequest(requestId) {
   }
 }
 
+async function handleGetGa4HitsRequest(requestId) {
+  logInfo(`Handling GA4 hits request: ${requestId}`);
+  
+  const { attachedTabId } = await chrome.storage.local.get(STORAGE_KEYS.TAB_ID);
+  
+  if (!attachedTabId) {
+    const errorResponse = {
+      type: "GA4_HITS_RESPONSE",
+      requestId,
+      payload: { 
+        error: "No tab attached. Please attach a tab to monitor GA4 hits.",
+        timestamp: Date.now()
+      },
+    };
+    
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify(errorResponse));
+    } else {
+      logError("Cannot send error response - WebSocket not connected");
+    }
+    return;
+  }
+
+  const hits = ga4HitsPerTab.get(attachedTabId) || [];
+  
+  const response = {
+    type: "GA4_HITS_RESPONSE",
+    requestId,
+    payload: {
+      hits: hits,
+      pageUrl: hits.length > 0 ? hits[0].pageUrl : null,
+      totalHits: hits.length,
+      timestamp: Date.now()
+    }
+  };
+  
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify(response));
+    logInfo(`Successfully sent GA4 hits response for request: ${requestId}`);
+  } else {
+    logError("Cannot send response - WebSocket not connected");
+    // Try to reconnect
+    attemptReconnect();
+  }
+}
+
+async function handleGetMetaPixelHitsRequest(requestId) {
+  logInfo(`Handling Meta Pixel hits request: ${requestId}`);
+  
+  const { attachedTabId } = await chrome.storage.local.get(STORAGE_KEYS.TAB_ID);
+  
+  if (!attachedTabId) {
+    const errorResponse = {
+      type: "META_PIXEL_HITS_RESPONSE",
+      requestId,
+      payload: { 
+        error: "No tab attached. Please attach a tab to monitor Meta Pixel hits.",
+        timestamp: Date.now()
+      },
+    };
+    
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify(errorResponse));
+    } else {
+      logError("Cannot send error response - WebSocket not connected");
+    }
+    return;
+  }
+
+  const hits = metaPixelHitsPerTab.get(attachedTabId) || [];
+  
+  const response = {
+    type: "META_PIXEL_HITS_RESPONSE",
+    requestId,
+    payload: {
+      hits: hits,
+      pageUrl: hits.length > 0 ? hits[0].pageUrl : null,
+      totalHits: hits.length,
+      timestamp: Date.now()
+    }
+  };
+  
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify(response));
+    logInfo(`Successfully sent Meta Pixel hits response for request: ${requestId}`);
+  } else {
+    logError("Cannot send response - WebSocket not connected");
+    // Try to reconnect
+    attemptReconnect();
+  }
+}
+
 // Enhanced message listener with better error handling
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   try {
@@ -491,6 +597,421 @@ chrome.tabs.onRemoved.addListener(async (tabId) => {
     broadcastConnectionStatus();
   }
 });
+
+// Monitor page navigation to clear GA4 hits
+chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
+  if (changeInfo.status === 'loading' && changeInfo.url) {
+    ga4HitsPerTab.set(tabId, []); // Clear hits for new page
+    metaPixelHitsPerTab.set(tabId, []); // Clear Meta Pixel hits for new page
+    logInfo(`Cleared GA4 and Meta Pixel hits for tab ${tabId} - new page: ${changeInfo.url}`);
+  }
+});
+
+// ---- GA4 Network Request Monitoring ----
+
+// Monitor GA4 GET requests (these contain parsed parameters)
+chrome.webRequest.onBeforeRequest.addListener(
+  handleGa4GetRequest,
+  {
+    urls: [
+      "https://www.google-analytics.com/g/collect*",
+      "https://analytics.google.com/g/collect*",
+      "https://*.analytics.google.com/*"
+    ]
+  },
+  ["requestBody"]
+);
+
+// Monitor ALL requests (GET and POST) for server-side GA4 tracking
+chrome.webRequest.onBeforeRequest.addListener(
+  handlePotentialServerSideTracking,
+  {
+    urls: ["<all_urls>"],
+    types: ["xmlhttprequest", "other"]
+  },
+  ["requestBody"]
+);
+
+// ---- Meta Pixel Network Request Monitoring ----
+
+// Monitor direct Meta Pixel requests
+chrome.webRequest.onBeforeRequest.addListener(
+  handleMetaPixelRequest,
+  {
+    urls: [
+      "https://www.facebook.com/tr*",
+      "https://facebook.com/tr*"
+    ]
+  },
+  ["requestBody"]
+);
+
+function handleGa4GetRequest(details) {
+  try {
+    const hit = parseGa4HitFromUrl(details);
+    if (hit) {
+      addHitToTab(details.tabId, hit);
+    }
+  } catch (error) {
+    logError("Error handling GA4 GET request:", error);
+  }
+}
+
+function parseGa4HitFromUrl(details) {
+  try {
+    const url = new URL(details.url);
+    const params = Object.fromEntries(url.searchParams.entries());
+    
+    return {
+      timestamp: Date.now(),
+      tabId: details.tabId, 
+      pageUrl: details.documentUrl,
+      method: 'GET',
+      eventName: params.en || 'page_view',
+      parameters: params,
+      measurementId: params.tid || 'unknown',
+      domain: url.hostname
+    };
+  } catch (error) {
+    logError("Error parsing GA4 URL hit:", error);
+    return null;
+  }
+}
+
+function addHitToTab(tabId, hit) {
+  if (!ga4HitsPerTab.has(tabId)) {
+    ga4HitsPerTab.set(tabId, []);
+  }
+  
+  const hits = ga4HitsPerTab.get(tabId);
+  hits.push(hit);
+  
+  // Keep only last MAX_HITS_PER_PAGE hits
+  if (hits.length > MAX_HITS_PER_PAGE) {
+    hits.splice(0, hits.length - MAX_HITS_PER_PAGE);
+  }
+  
+  logInfo(`Added GA4 hit to tab ${tabId}: ${hit.eventName}`);
+}
+
+function handlePotentialServerSideTracking(details) {
+  // Skip Google Analytics and Facebook domains (already handled by other listeners)
+  if (details.url.includes('google-analytics.com') || 
+      details.url.includes('analytics.google.com') ||
+      details.url.includes('facebook.com')) {
+    return;
+  }
+  
+  try {
+    let ga4Data = null;
+    let metaPixelData = null;
+    
+    // Handle GET requests - check URL parameters
+    if (details.method === 'GET') {
+      ga4Data = detectGA4InUrl(details.url);
+      metaPixelData = detectMetaPixelInUrl(details.url);
+    }
+    // Handle POST requests - check request body
+    else if (details.method === 'POST') {
+      ga4Data = detectGA4InRequestBody(details.requestBody);
+      metaPixelData = detectMetaPixelInRequestBody(details.requestBody);
+    }
+    
+    // Process GA4 data if found
+    if (ga4Data) {
+      const hit = {
+        timestamp: Date.now(),
+        tabId: details.tabId,
+        method: details.method,
+        eventName: ga4Data.en || 'server_side_event',
+        parameters: ga4Data,
+        measurementId: ga4Data.tid || 'unknown',
+        serverSide: true,
+        domain: new URL(details.url).hostname
+      };
+      
+      addHitToTab(details.tabId, hit);
+      logInfo(`Server-side GA4 hit detected: ${hit.eventName} on ${details.url}`);
+    }
+    
+    // Process Meta Pixel data if found
+    if (metaPixelData) {
+      const hit = {
+        timestamp: Date.now(),
+        tabId: details.tabId,
+        method: details.method,
+        eventName: metaPixelData.ev || metaPixelData.event || 'server_side_event',
+        pixelId: metaPixelData.id || metaPixelData.pixel_id || 'unknown',
+        parameters: metaPixelData,
+        serverSide: true,
+        domain: new URL(details.url).hostname,
+        customData: extractMetaPixelCustomData(metaPixelData),
+        userData: extractMetaPixelUserData(metaPixelData)
+      };
+      
+      addMetaPixelHitToTab(details.tabId, hit);
+      logInfo(`Server-side Meta Pixel hit detected: ${hit.eventName} on ${details.url}`);
+    }
+  } catch (error) {
+    // Silently ignore parsing errors to avoid spam
+    // logError("Error detecting server-side tracking:", error);
+  }
+}
+
+function detectGA4InUrl(url) {
+  try {
+    const urlObj = new URL(url);
+    const params = {};
+    
+    // Extract all URL parameters
+    for (const [key, value] of urlObj.searchParams.entries()) {
+      params[key] = value;
+    }
+    
+    // Check if this looks like GA4 data
+    if (isGA4Payload(params)) {
+      return params;
+    }
+  } catch (e) {
+    // Invalid URL, skip
+  }
+  
+  return null;
+}
+
+function detectGA4InRequestBody(requestBody) {
+  if (!requestBody) return null;
+  
+  let payload = {};
+  
+  // Handle form data
+  if (requestBody.formData) {
+    for (const [key, values] of Object.entries(requestBody.formData)) {
+      payload[key] = values[0];
+    }
+  }
+  
+  // Handle raw data
+  if (requestBody.raw && requestBody.raw.length > 0) {
+    try {
+      const decoder = new TextDecoder();
+      const text = decoder.decode(requestBody.raw[0].bytes);
+      
+      // Try parsing as URL-encoded
+      if (text.includes('=') && text.includes('&')) {
+        payload = parseUrlEncoded(text);
+      }
+      // Try parsing as JSON
+      else if (text.trim().startsWith('{')) {
+        payload = JSON.parse(text);
+      }
+    } catch (e) {
+      // Not parseable, skip
+      return null;
+    }
+  }
+  
+  // Check if this looks like GA4 data
+  if (isGA4Payload(payload)) {
+    return payload;
+  }
+  
+  return null;
+}
+
+function isGA4Payload(payload) {
+  // Check for GA4 indicators
+  const hasTrackingId = payload.tid && payload.tid.startsWith('G-');
+  const hasClientId = payload.cid && typeof payload.cid === 'string';
+  const hasVersion2 = payload.v === '2' || payload.v === 2;
+  const hasEventName = payload.en && typeof payload.en === 'string';
+  
+  // Must have at least tracking ID and one other GA4 indicator
+  return hasTrackingId && (hasClientId || hasVersion2 || hasEventName);
+}
+
+function parseUrlEncoded(text) {
+  const params = {};
+      const pairs = text.split('&');
+    for (const pair of pairs) {
+      const [key, value] = pair.split('=');
+    if (key && value !== undefined) {
+      try {
+        params[decodeURIComponent(key)] = decodeURIComponent(value);
+      } catch (e) {
+        // Skip malformed pairs
+      }
+    }
+  }
+  return params;
+}
+
+function handleMetaPixelRequest(details) {
+  try {
+    const hit = parseMetaPixelHitFromUrl(details);
+    if (hit) {
+      addMetaPixelHitToTab(details.tabId, hit);
+    }
+  } catch (error) {
+    logError("Error handling Meta Pixel request:", error);
+  }
+}
+
+function parseMetaPixelHitFromUrl(details) {
+  try {
+    const url = new URL(details.url);
+    const parameters = {};
+    
+    // Extract all URL parameters
+    for (const [key, value] of url.searchParams.entries()) {
+      parameters[key] = value;
+    }
+    
+    const hit = {
+      timestamp: Date.now(),
+      tabId: details.tabId,
+      method: details.method,
+      eventName: parameters.ev || parameters.event || 'PageView',
+      pixelId: parameters.id || 'unknown',
+      parameters: parameters,
+      serverSide: false,
+      domain: url.hostname,
+      customData: extractMetaPixelCustomData(parameters),
+      userData: extractMetaPixelUserData(parameters)
+    };
+    
+    logInfo(`Meta Pixel hit captured: ${hit.eventName} (Pixel: ${hit.pixelId})`);
+    return hit;
+  } catch (error) {
+    logError("Error parsing Meta Pixel hit from URL:", error);
+    return null;
+  }
+}
+
+function detectMetaPixelInUrl(url) {
+  try {
+    const urlObj = new URL(url);
+    const params = {};
+    
+    // Extract all URL parameters
+    for (const [key, value] of urlObj.searchParams.entries()) {
+      params[key] = value;
+    }
+    
+    // Check if this looks like Meta Pixel data
+    if (isMetaPixelPayload(params)) {
+      return params;
+    }
+  } catch (e) {
+    // Invalid URL, skip
+  }
+  
+  return null;
+}
+
+function detectMetaPixelInRequestBody(requestBody) {
+  if (!requestBody) return null;
+  
+  let payload = {};
+  
+  // Handle form data
+  if (requestBody.formData) {
+    for (const [key, values] of Object.entries(requestBody.formData)) {
+      payload[key] = values[0];
+    }
+  }
+  
+  // Handle raw data
+  if (requestBody.raw && requestBody.raw.length > 0) {
+    try {
+      const decoder = new TextDecoder();
+      const text = decoder.decode(requestBody.raw[0].bytes);
+      
+      // Try parsing as URL-encoded
+      if (text.includes('=') && text.includes('&')) {
+        payload = parseUrlEncoded(text);
+      }
+      // Try parsing as JSON
+      else if (text.trim().startsWith('{')) {
+        payload = JSON.parse(text);
+      }
+    } catch (e) {
+      // Not parseable, skip
+      return null;
+    }
+  }
+  
+  // Check if this looks like Meta Pixel data
+  if (isMetaPixelPayload(payload)) {
+    return payload;
+  }
+  
+  return null;
+}
+
+function isMetaPixelPayload(payload) {
+  // Check for Meta Pixel indicators
+  const hasPixelId = payload.id && /^\d+$/.test(payload.id); // Numeric pixel ID
+  const hasFacebookParams = Object.keys(payload).some(key => 
+    key.startsWith('fb_') || key.startsWith('cd[') || key.startsWith('ud[')
+  );
+  const hasMetaPixelUrl = payload.dl && payload.dl.includes('facebook.com/tr');
+  
+  // Meta Pixel requires either:
+  // 1. Numeric pixel ID AND event name, OR
+  // 2. Facebook-specific parameters, OR  
+  // 3. Facebook URL reference
+  const hasEventName = payload.ev || payload.event;
+  const hasMetaPixelCombo = hasPixelId && hasEventName;
+  
+  return hasMetaPixelCombo || hasFacebookParams || hasMetaPixelUrl;
+}
+
+function extractMetaPixelCustomData(params) {
+  const customData = {};
+  
+  // Extract custom data parameters (cd[...])
+  for (const [key, value] of Object.entries(params)) {
+    if (key.startsWith('cd[') && key.endsWith(']')) {
+      const cdKey = key.slice(3, -1); // Remove 'cd[' and ']'
+      customData[cdKey] = value;
+    }
+  }
+  
+  return Object.keys(customData).length > 0 ? customData : undefined;
+}
+
+function extractMetaPixelUserData(params) {
+  const userData = {};
+  
+  // Extract user data parameters (ud[...])
+  for (const [key, value] of Object.entries(params)) {
+    if (key.startsWith('ud[') && key.endsWith(']')) {
+      const udKey = key.slice(3, -1); // Remove 'ud[' and ']'
+      userData[udKey] = value;
+    }
+  }
+  
+  return Object.keys(userData).length > 0 ? userData : undefined;
+}
+
+function addMetaPixelHitToTab(tabId, hit) {
+  if (!tabId || !hit) return;
+  
+  if (!metaPixelHitsPerTab.has(tabId)) {
+    metaPixelHitsPerTab.set(tabId, []);
+  }
+  
+  const hits = metaPixelHitsPerTab.get(tabId);
+  hits.push(hit);
+  
+  // Keep only the most recent hits to prevent memory issues
+  if (hits.length > MAX_META_PIXEL_HITS_PER_PAGE) {
+    hits.shift(); // Remove oldest hit
+  }
+  
+  logInfo(`Added Meta Pixel hit to tab ${tabId}: ${hit.eventName}`);
+}
 
 // Clean up on service worker shutdown
 self.addEventListener("beforeunload", () => {
