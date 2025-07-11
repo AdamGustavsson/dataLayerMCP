@@ -5,17 +5,19 @@ This repository contains an MVP implementation that lets a Large Language Model 
 Components
 -----------
 
-1. **MCP Server (Node + TypeScript)** – local process exposing three MCP tools:
+1. **MCP Server (Node + TypeScript)** – local process exposing four MCP tools:
    - `getDataLayer()` – captures the current contents of `window.dataLayer`
    - `getGa4Hits()` – returns all GA4 tracking events recorded from the current page (includes both direct Google Analytics requests and server-side tracking)
    - `getMetaPixelHits()` – returns all Meta Pixel (Facebook Pixel) tracking events recorded from the current page (includes both direct Facebook requests and server-side tracking)
+   - `getNewGTMPreviewEvents()` – returns NEW GTM preview events from Google Tag Assistant (events with numbers greater than the last call)
    
    Communicates with the Chrome extension via WebSocket (`ws://localhost:57321`).
 
 2. **Chrome Extension (Manifest V3)** – lets the user attach/detach a tab and provides:
    - Access to the tab's `window.dataLayer` 
    - Automatic monitoring and recording of GA4 network requests
-   - Fresh recording per page navigation
+   - Automatic monitoring and recording of Meta Pixel network requests
+   - GTM preview data scraping from Google Tag Assistant (when attached tab is on tagassistant.google.com)
 
 Quick start
 -----------
@@ -66,7 +68,17 @@ Manual end-to-end test
    ```
    The server should output an array of recorded Meta Pixel hits with event names, pixel IDs, custom data, and timestamps. This includes both direct Facebook Pixel requests and server-side Conversions API tracking.
 
-5. **Observe logs**  
+5. **Test GTM preview data scraping**
+   • Navigate to https://tagassistant.google.com and enter GTM preview mode for your website
+   • Attach the extension to your website tab (not the Tag Assistant tab - the tool automatically finds Tag Assistant)
+   • Perform actions on your website to generate GTM events that appear in Tag Assistant
+   • Run the GTM preview tool:
+   ```bash
+   echo '{ "tool": "getNewGTMPreviewEvents", "args": {} }' | npm run start
+   ```
+   The tool returns only NEW events since the last call (tracks event numbers internally). First call returns all events, subsequent calls return only newer events. No caching - session-based tracking only.
+
+6. **Observe logs**  
    • Server console will show request / response and WebSocket connection messages.  
    • Extension's background service-worker logs can be viewed in `chrome://extensions/` → *Service Worker* → **Inspect**.
 
@@ -130,7 +142,7 @@ For example:
 - **macOS/Linux**: `"/Users/yourname/Documents/code/dataLayerMCP/dist/server/src/index.js"`
 - **Windows**: `"C:\\Users\\yourname\\Documents\\code\\dataLayerMCP\\dist\\server\\src\\index.js"`
 
-Save the configuration, then **restart Cursor**. The server will be globally available across all projects, and tools named `mcp_dataLayerMCP_getDataLayer`, `mcp_dataLayerMCP_getGa4Hits`, and `mcp_dataLayerMCP_getMetaPixelHits` will appear in the tool list for any chat session.
+Save the configuration, then **restart Cursor**. The server will be globally available across all projects, and tools named `mcp_dataLayerMCP_getDataLayer`, `mcp_dataLayerMCP_getGa4Hits`, `mcp_dataLayerMCP_getMetaPixelHits`, and `mcp_dataLayerMCP_getNewGTMPreviewEvents` will appear in the tool list for any chat session.
 
 #### b) VS Code + GitHub Copilot Chat (`.vscode/mcp.json`)
 
@@ -159,16 +171,17 @@ VS Code will show a **Start** code-lens at the top of the JSON — click it to l
    - **DataLayer**: "What is the dataLayer contents?" or "Run the getDataLayer tool"
    - **GA4 Hits**: "Show me the GA4 hits" or "What GA4 events have been recorded?"
    - **Meta Pixel Hits**: "Show me the Meta Pixel hits" or "What Facebook Pixel events have been fired?"
+   - **GTM Preview**: "Get new GTM events" or "What new events have occurred in Tag Assistant?"
 3. Make sure the Chrome extension is attached to the tab you want to inspect — the JSON response will appear in Chat.
 
 **Available Tools:**
-- `getDataLayer` - Captures current `window.dataLayer` contents
-- `getGa4Hits` - Returns array of GA4 tracking events from current page (resets on page navigation)
-- `getMetaPixelHits` - Returns array of Meta Pixel tracking events from current page (resets on page navigation)
+- `getDataLayer` - Captures current `window.dataLayer` contents from **attached tab**
+- `getGa4Hits` - Returns array of GA4 tracking events from **attached tab** (resets on page navigation)
+- `getMetaPixelHits` - Returns array of Meta Pixel tracking events from **attached tab** (resets on page navigation)  
+- `getNewGTMPreviewEvents` - Returns NEW events from any open **Tag Assistant tab** (tracks last event number, no caching)
 
-**Pro tip**: Combine with BrowserMCP to have the agent control the page by clicking around and check the dataLayer changes, GA4 events, and Meta Pixel events being fired!
+**Pro tip**: Combine with BrowserMCP to have the agent control the page by clicking around and check the dataLayer changes, GA4 events, Meta Pixel events, and GTM preview data being updated!
 
-That's it — you now have global, one-click, LLM-accessible access to any page's `window.dataLayer`, GA4 tracking events, and Meta Pixel tracking events from any Cursor project!
+That's it — you now have global, one-click, LLM-accessible access to any page's `window.dataLayer`, GA4 tracking events, Meta Pixel tracking events, and GTM preview data from any Cursor project!
 
-This MCP server includes a Chrome extension that communicates with the server, extracts `window.dataLayer` from the browser, monitors GA4 and Meta Pixel network requests, and forwards all data to the MCP server for AI access. The extension communicates with the server via WebSocket (`ws://localhost:57321`).
-
+This MCP server includes a Chrome extension that communicates with the server, extracts `window.dataLayer` from the browser, monitors GA4 and Meta Pixel network requests, scrapes GTM preview data from Tag Assistant, and forwards all data to the MCP server for AI access. The extension communicates with the server via WebSocket (`ws://localhost:57321`).

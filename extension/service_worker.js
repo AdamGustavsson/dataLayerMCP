@@ -22,6 +22,8 @@ const connectionState = {
 const STORAGE_KEYS = {
   TAB_ID: "attachedTabId",
   TAB_TITLE: "attachedTabTitle",
+  LAST_EVENT_NUMBER: "lastGtmEventNumber", // For tracking GTM event numbers
+  PREVIEW_SESSION: "gtmPreviewCb" // For tracking preview session callback ID
 };
 
 // GA4 hits storage - per tab
@@ -159,6 +161,9 @@ async function connectWebSocket() {
           break;
         case "REQUEST_META_PIXEL_HITS":
           await handleGetMetaPixelHitsRequest(msg.requestId);
+          break;
+        case "REQUEST_NEW_GTM_PREVIEW_EVENTS":
+          await handleGetNewGtmPreviewEventsRequest(msg.requestId);
           break;
         case "KEEPALIVE_PONG":
           logInfo("Received keepalive pong");
@@ -1011,6 +1016,712 @@ function addMetaPixelHitToTab(tabId, hit) {
   }
   
   logInfo(`Added Meta Pixel hit to tab ${tabId}: ${hit.eventName}`);
+}
+
+// Global tracking of last event number reported (per session)
+async function extractNewGtmPreviewEvents() {
+  try {
+    // Get the last reported event number from storage
+    const { lastGtmEventNumber = 0 } = await chrome.storage.local.get(STORAGE_KEYS.LAST_EVENT_NUMBER);
+    
+    console.log("🚀 GTM New Events Extraction Started");
+    console.log("📍 Current URL:", window.location.href);
+    console.log("📄 Page Title:", document.title);
+    console.log(`🔢 Last reported event number: ${lastGtmEventNumber}`);
+    console.log("📄 Document ready state:", document.readyState);
+    
+    // Check if we're on the right page
+    if (!window.location.href.includes('tagassistant.google.com')) {
+      console.error("❌ Not on Tag Assistant page!");
+      return {
+        error: "Not on Tag Assistant page",
+        newEvents: [],
+        lastEventNumber: lastGtmEventNumber
+      };
+    }
+
+    // Helper function to introduce a delay
+    const wait = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
+    // Wait for UI to be fully loaded if document is not ready
+    if (document.readyState !== 'complete') {
+      console.log("⏳ Waiting for document to be ready...");
+      await wait(2000);
+    }
+
+    console.log("🔍 Checking DOM access...");
+    
+    // Test basic DOM access
+    try {
+      const body = document.body;
+      const html = document.documentElement;
+      console.log("✅ Can access document body:", !!body);
+      console.log("✅ Can access document root:", !!html);
+      console.log("📄 Body class names:", body.className);
+    } catch (domError) {
+      console.error("❌ Cannot access basic DOM elements:", domError);
+      return {
+        error: "Cannot access DOM elements: " + domError.message,
+        newEvents: [],
+        lastEventNumber: lastGtmEventNumber,
+        debug: {
+          url: window.location.href,
+          title: document.title,
+          readyState: document.readyState,
+          timestamp: Date.now()
+        }
+      };
+    }
+
+    // Try multiple selectors to find event rows
+    console.log("🔍 Searching for event rows...");
+    
+    let allEventRows = [];
+    const selectors = [
+      '.message-list__row--indented',
+      '.message-list__row',
+      '[class*="message-list__row"]',
+      '[class*="message-list"] [class*="row"]',
+      // Add more generic selectors
+      'div[class*="row"]',
+      '[role="row"]',
+      '[class*="event"]'
+    ];
+    
+    for (const selector of selectors) {
+      try {
+        const rows = document.querySelectorAll(selector);
+        console.log(`🔍 Selector "${selector}" found ${rows.length} rows`);
+        
+        if (rows.length > 0) {
+          // Log the first row found to help debug
+          console.log(`📋 First row HTML for "${selector}":`, rows[0].outerHTML);
+          console.log(`📋 First row classes for "${selector}":`, rows[0].className);
+          
+          if (!allEventRows.length) {
+            allEventRows = rows;
+          }
+        }
+      } catch (selectorError) {
+        console.error(`❌ Error with selector "${selector}":`, selectorError);
+      }
+    }
+
+    // If still no rows found, try to log some parent containers
+    if (allEventRows.length === 0) {
+      console.log("⚠️ No event rows found with any selector, checking containers...");
+      
+      // Try to find and log any relevant containers
+      const containers = document.querySelectorAll('div[class*="container"], div[class*="list"], div[class*="events"]');
+      console.log(`📋 Found ${containers.length} potential containers`);
+      
+      containers.forEach((container, index) => {
+        console.log(`📋 Container ${index} classes:`, container.className);
+        console.log(`📋 Container ${index} children count:`, container.children.length);
+        // Log first few children if any
+        if (container.children.length > 0) {
+          console.log(`📋 First child of container ${index}:`, container.children[0].outerHTML);
+        }
+      });
+
+      return {
+        newEvents: [],
+        lastEventNumber: lastGtmEventNumber,
+        totalEventsOnPage: 0,
+        debug: {
+          url: window.location.href,
+          title: document.title,
+          timestamp: Date.now(),
+          documentReady: document.readyState,
+          containers: Array.from(containers).map(c => ({
+            className: c.className,
+            childCount: c.children.length
+          }))
+        }
+      };
+    }
+
+    // Rest of the function remains the same...
+    const newEvents = [];
+    let highestEventNumber = lastGtmEventNumber;
+    
+    // Check each DOM row for new events
+    for (const [index, eventRow] of allEventRows.entries()) {
+      try {
+        console.log(`📋 Processing row ${index}...`);
+        
+        // Extract event number and name from DOM
+        const eventNumberElement = eventRow.querySelector('[class*="index"]') || 
+                                eventRow.querySelector('[class*="number"]');
+        const eventNameElement = eventRow.querySelector('[class*="title"]') || 
+                              eventRow.querySelector('[class*="name"]');
+        
+        if (eventNumberElement && eventNameElement) {
+          const eventNumber = parseInt(eventNumberElement.textContent.trim(), 10);
+          const eventName = eventNameElement.textContent.trim();
+          
+          console.log(`🔍 Found event #${eventNumber} "${eventName}"`);
+          
+          if (isNaN(eventNumber)) {
+            console.log("⚠️ Invalid event number:", eventNumberElement.textContent);
+            continue;
+          }
+          
+          // Only process events with numbers greater than last reported
+          if (eventNumber > lastGtmEventNumber) {
+            console.log(`🆕 New event detected: #${eventNumber} "${eventName}"`);
+            
+            try {
+              // Click the event to load tag details
+              console.log("🖱️ Clicking event to load tag details...");
+              eventRow.click();
+              await wait(250); // Wait for UI to update
+            } catch (clickError) {
+              console.error("❌ Error clicking row:", clickError);
+            }
+            
+            let tagsFired = [];
+            try {
+              // Try to find tags section
+              const tagSelectors = ['[class*="fired-tag"]', '[class*="tags-fired"]', '[class*="tag-list"]'];
+              let firedTagsSection = null;
+              
+              for (const selector of tagSelectors) {
+                const element = document.querySelector(selector);
+                if (element) {
+                  firedTagsSection = element;
+                  console.log(`✅ Found tags section with selector: ${selector}`);
+                  break;
+                }
+              }
+              
+              if (firedTagsSection) {
+                const sectionText = firedTagsSection.textContent?.trim();
+                console.log(`📋 Tags section text: "${sectionText}"`);
+                
+                if (sectionText && !sectionText.includes('None') && !sectionText.includes('No tags')) {
+                  const tagElements = firedTagsSection.querySelectorAll('*');
+                  tagElements.forEach((el) => {
+                    const text = el.textContent?.trim();
+                    if (text && text.length > 3 && text.length < 80 &&
+                        !text.includes('Tags fired') && !text.includes('None') &&
+                        !text.includes('No tags') && text !== sectionText &&
+                        (text.includes('GA4') || text.includes('Google') || text.includes('Analytics') ||
+                         text.includes('Tag') || text.includes('Conversion') || text.includes('Pixel'))) {
+                      if (!tagsFired.includes(text)) {
+                        tagsFired.push(text);
+                        console.log(`  🏷️ Found tag: "${text}"`);
+                      }
+                    }
+                  });
+                }
+              } else {
+                console.log("⚠️ Could not find tags section");
+              }
+            } catch (tagsError) {
+              console.error("❌ Error processing tags:", tagsError);
+            }
+            
+            // Add to new events
+            newEvents.push({
+              eventNumber: eventNumber,
+              eventName: eventName,
+              tagsFired: tagsFired,
+              timestamp: Date.now()
+            });
+            
+            // Track highest event number
+            if (eventNumber > highestEventNumber) {
+              highestEventNumber = eventNumber;
+            }
+          }
+        } else {
+          console.log(`⚠️ Could not extract event info from row ${index}:`, {
+            hasNumberElement: !!eventNumberElement,
+            hasNameElement: !!eventNameElement,
+            rowContent: eventRow.textContent?.trim()
+          });
+        }
+      } catch (rowError) {
+        console.error(`❌ Error processing row ${index}:`, rowError);
+      }
+    }
+    
+    // Update the last reported event number
+    if (highestEventNumber > lastGtmEventNumber) {
+      // Update the storage with new highest number
+      await chrome.storage.local.set({
+        [STORAGE_KEYS.LAST_EVENT_NUMBER]: highestEventNumber
+      });
+      console.log(`✅ Updated last reported event number in storage to: ${highestEventNumber}`);
+    }
+    
+    // Sort new events by event number
+    newEvents.sort((a, b) => a.eventNumber - b.eventNumber);
+    
+    console.log(`✅ GTM New Events Extraction Complete!`);
+    console.log(`🆕 New events found: ${newEvents.length}`);
+    console.log(`📊 Total events on page: ${allEventRows.length}`);
+
+    return {
+      newEvents: newEvents,
+      lastEventNumber: highestEventNumber,
+      totalEventsOnPage: allEventRows.length,
+      debug: {
+        url: window.location.href,
+        title: document.title,
+        timestamp: Date.now(),
+        documentReady: document.readyState,
+        selectors: selectors.map(s => ({
+          selector: s,
+          count: document.querySelectorAll(s).length
+        }))
+      }
+    };
+  } catch (error) {
+    console.error("❌ Top-level error in extractNewGtmPreviewEvents:", error);
+    // Get the last event number even in case of error
+    const { lastGtmEventNumber = 0 } = await chrome.storage.local.get(STORAGE_KEYS.LAST_EVENT_NUMBER);
+    return {
+      error: "Failed to extract events: " + error.message,
+      newEvents: [],
+      lastEventNumber: lastGtmEventNumber,
+      debug: {
+        url: window.location.href,
+        title: document.title,
+        timestamp: Date.now(),
+        errorMessage: error.message,
+        errorStack: error.stack
+      }
+    };
+  }
+}
+
+async function handleGetNewGtmPreviewEventsRequest(requestId) {
+  logInfo(`Handling new GTM preview events request: ${requestId}`);
+  
+  try {
+    // Search for any open Tag Assistant tab
+    const tagAssistantTabs = await chrome.tabs.query({
+      url: "https://tagassistant.google.com/*"
+    });
+    
+    if (tagAssistantTabs.length === 0) {
+      const errorResponse = {
+        type: "NEW_GTM_PREVIEW_EVENTS_RESPONSE",
+        requestId,
+        payload: { 
+          error: "No Tag Assistant tab found. Please open https://tagassistant.google.com in a browser tab.",
+          timestamp: Date.now()
+        },
+      };
+      
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify(errorResponse));
+      } else {
+        logError("Cannot send error response - WebSocket not connected");
+      }
+      return;
+    }
+
+    // Use the first Tag Assistant tab found
+    const tagAssistantTab = tagAssistantTabs[0];
+    logInfo(`Found Tag Assistant tab: ${tagAssistantTab.id} - ${tagAssistantTab.title}`);
+
+    // Parse the URL and fragment
+    const url = new URL(tagAssistantTab.url);
+    const hashParams = new URLSearchParams(url.hash.replace('#', '').replace('/?', ''));
+    const currentCb = hashParams.get('cb');
+    const { gtmPreviewCb } = await chrome.storage.local.get(STORAGE_KEYS.PREVIEW_SESSION);
+
+    logInfo("🔍 Current cb:", currentCb);
+    logInfo("🔍 GTM preview cb:", gtmPreviewCb);
+    if (currentCb && currentCb !== gtmPreviewCb) {
+      logInfo(`New preview session detected. Old cb: ${gtmPreviewCb}, New cb: ${currentCb}`);
+      // Reset event counter and update session
+      await chrome.storage.local.set({
+        [STORAGE_KEYS.LAST_EVENT_NUMBER]: 0,
+        [STORAGE_KEYS.PREVIEW_SESSION]: currentCb
+      });
+      logInfo('Reset event counter for new preview session');
+    }
+
+    // Get the last event number from storage
+    const { lastGtmEventNumber = 0 } = await chrome.storage.local.get(STORAGE_KEYS.LAST_EVENT_NUMBER);
+
+    // Execute new events extraction on the Tag Assistant tab with the last event number
+    const results = await chrome.scripting.executeScript({
+      target: { tabId: tagAssistantTab.id },
+      func: (lastEventNumber) => {
+        return new Promise(async (resolve) => {
+          try {
+            console.log("🚀 GTM New Events Extraction Started");
+            console.log("📍 Current URL:", window.location.href);
+            console.log("📄 Page Title:", document.title);
+            console.log(`🔢 Last reported event number: ${lastEventNumber}`);
+            console.log("📄 Document ready state:", document.readyState);
+            
+            // Helper function to introduce a delay
+            const wait = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
+            // Wait for UI to be fully loaded if document is not ready
+            if (document.readyState !== 'complete') {
+              console.log("⏳ Waiting for document to be ready...");
+              await wait(2000);
+            }
+
+            console.log("🔍 Checking DOM access...");
+            
+            // Test basic DOM access
+            try {
+              const body = document.body;
+              const html = document.documentElement;
+              console.log("✅ Can access document body:", !!body);
+              console.log("✅ Can access document root:", !!html);
+              console.log("📄 Body class names:", body.className);
+            } catch (domError) {
+              console.error("❌ Cannot access basic DOM elements:", domError);
+              resolve({
+                error: "Cannot access DOM elements: " + domError.message,
+                newEvents: [],
+                lastEventNumber: lastEventNumber,
+                debug: {
+                  url: window.location.href,
+                  title: document.title,
+                  readyState: document.readyState,
+                  timestamp: Date.now()
+                }
+              });
+              return;
+            }
+
+            // First, find all page groups
+            console.log("🔍 Searching for page groups...");
+            const pageGroups = [];
+            const pageGroupElements = document.querySelectorAll('.message-list__title.wd-debug-message-title');
+            
+            console.log(`📋 Found ${pageGroupElements.length} page groups`);
+            
+            // Use for...of instead of forEach for async operations
+            for (const [index, pageEl] of Array.from(pageGroupElements).entries()) {
+              const pageTitle = pageEl.textContent?.trim();
+              console.log(`📄 Page group ${index + 1}: "${pageTitle}"`);
+              
+              // Find URL for this page group
+              let pageUrl = null;
+              try {
+                // Click the page group title to ensure URL is visible
+                pageEl.click();
+                // Wait a bit for UI to update
+                await wait(100);
+                // Look for URL in the next elements
+                const urlInput = document.querySelector('.blg-body.content__url.wd-page-url, input.wd-page-url[type="text"]');
+                if (urlInput) {
+                  pageUrl = urlInput.value;
+                  console.log(`📍 Found URL for page "${pageTitle}": ${pageUrl}`);
+                }
+              } catch (error) {
+                console.error(`❌ Error getting URL for page "${pageTitle}":`, error);
+              }
+              
+              pageGroups.push({
+                title: pageTitle,
+                element: pageEl,
+                url: pageUrl,
+                events: []
+              });
+            }
+
+            // Try multiple selectors to find event rows
+            console.log("🔍 Searching for event rows...");
+            
+            let allEventRows = [];
+            const selectors = [
+              '.message-list__row--indented',
+              '.message-list__row',
+              '[class*="message-list__row"]',
+              '[class*="message-list"] [class*="row"]',
+              'div[class*="row"]',
+              '[role="row"]',
+              '[class*="event"]'
+            ];
+            
+            for (const selector of selectors) {
+              try {
+                const rows = document.querySelectorAll(selector);
+                console.log(`🔍 Selector "${selector}" found ${rows.length} rows`);
+                
+                if (rows.length > 0) {
+                  console.log(`📋 First row HTML for "${selector}":`, rows[0].outerHTML);
+                  console.log(`📋 First row classes for "${selector}":`, rows[0].className);
+                  
+                  if (!allEventRows.length) {
+                    allEventRows = rows;
+                  }
+                }
+              } catch (selectorError) {
+                console.error(`❌ Error with selector "${selector}":`, selectorError);
+              }
+            }
+
+            if (allEventRows.length === 0) {
+              console.log("⚠️ No event rows found with any selector");
+              resolve({
+                newEvents: [],
+                lastEventNumber: lastEventNumber,
+                totalEventsOnPage: 0,
+                pages: pageGroups.map(pg => ({ title: pg.title, events: [] })),
+                debug: {
+                  url: window.location.href,
+                  title: document.title,
+                  timestamp: Date.now(),
+                  documentReady: document.readyState,
+                  pageGroupsFound: pageGroups.length
+                }
+              });
+              return;
+            }
+
+            const newEvents = [];
+            let highestEventNumber = lastEventNumber;
+            
+            // Process events and associate them with page groups
+            for (const [index, eventRow] of allEventRows.entries()) {
+              try {
+                console.log(`📋 Processing row ${index}...`);
+                
+                const eventNumberElement = eventRow.querySelector('[class*="index"]') || 
+                                       eventRow.querySelector('[class*="number"]');
+                const eventNameElement = eventRow.querySelector('[class*="title"]') || 
+                                     eventRow.querySelector('[class*="name"]');
+                
+                if (eventNumberElement && eventNameElement) {
+                  const eventNumber = parseInt(eventNumberElement.textContent.trim(), 10);
+                  const eventName = eventNameElement.textContent.trim();
+                  
+                  console.log(`🔍 Found event #${eventNumber} "${eventName}"`);
+                  
+                  if (isNaN(eventNumber)) {
+                    console.log("⚠️ Invalid event number:", eventNumberElement.textContent);
+                    continue;
+                  }
+                  
+                  // Find which page group this event belongs to
+                  let pageGroup = null;
+                  for (let i = pageGroups.length - 1; i >= 0; i--) {
+                    if (eventRow.compareDocumentPosition(pageGroups[i].element) & Node.DOCUMENT_POSITION_PRECEDING) {
+                      pageGroup = pageGroups[i];
+                      break;
+                    }
+                  }
+                  
+                  if (eventNumber > lastEventNumber) {
+                    console.log(`🆕 New event detected: #${eventNumber} "${eventName}"`);
+                    
+                    let eventUrl = null; // Declare eventUrl here
+                    try {
+                      console.log("🖱️ Clicking event to load tag details...");
+                      eventRow.click();
+                      await wait(250);
+
+                      // Look for URL element after clicking
+                      const urlElement = document.querySelector('.blg-body.content__url.wd-page-url');
+                      eventUrl = urlElement ? urlElement.value : null; // Assign to the variable in scope
+                      if (eventUrl) {
+                        console.log(`📍 Found event URL: ${eventUrl}`);
+                      }
+
+                    } catch (clickError) {
+                      console.error("❌ Error clicking row:", clickError);
+                    }
+                    
+                    let tagsFired = [];
+                    try {
+                      const tagSelectors = ['[class*="fired-tag"]', '[class*="tags-fired"]', '[class*="tag-list"]'];
+                      let firedTagsSection = null;
+                      
+                      for (const selector of tagSelectors) {
+                        const element = document.querySelector(selector);
+                        if (element) {
+                          firedTagsSection = element;
+                          break;
+                        }
+                      }
+                      
+                      if (firedTagsSection) {
+                        const sectionText = firedTagsSection.textContent?.trim();
+                        
+                        if (sectionText && !sectionText.includes('None') && !sectionText.includes('No tags')) {
+                          const tagElements = firedTagsSection.querySelectorAll('*');
+                          tagElements.forEach((el) => {
+                            const text = el.textContent?.trim();
+                            if (text && text.length > 3 && text.length < 80 &&
+                                !text.includes('Tags fired') && !text.includes('None') &&
+                                !text.includes('No tags') && text !== sectionText &&
+                                (text.includes('GA4') || text.includes('Google') || text.includes('Analytics') ||
+                                 text.includes('Tag') || text.includes('Conversion') || text.includes('Pixel'))) {
+                              if (!tagsFired.includes(text)) {
+                                tagsFired.push(text);
+                              }
+                            }
+                          });
+                        }
+                      }
+                    } catch (tagsError) {
+                      console.error("❌ Error processing tags:", tagsError);
+                    }
+                    
+                    const eventData = {
+                      eventNumber: eventNumber,
+                      eventName: eventName,
+                      tagsFired: tagsFired,
+                      timestamp: Date.now(),
+                      page: pageGroup ? {
+                        title: pageGroup.title,
+                        index: pageGroups.indexOf(pageGroup),
+                        url: pageGroup.url
+                      } : null
+                    };
+
+                    newEvents.push(eventData);
+                    if (pageGroup) {
+                      pageGroup.events.push(eventData);
+                    }
+                    
+                    if (eventNumber > highestEventNumber) {
+                      highestEventNumber = eventNumber;
+                    }
+                  }
+                } else {
+                  console.log(`⚠️ Could not extract event info from row ${index}:`, {
+                    hasNumberElement: !!eventNumberElement,
+                    hasNameElement: !!eventNameElement,
+                    rowContent: eventRow.textContent?.trim()
+                  });
+                }
+              } catch (rowError) {
+                console.error(`❌ Error processing row ${index}:`, rowError);
+              }
+            }
+            
+            newEvents.sort((a, b) => a.eventNumber - b.eventNumber);
+            
+            console.log(`✅ GTM New Events Extraction Complete!`);
+            console.log(`🆕 New events found: ${newEvents.length}`);
+            console.log(`📊 Total events on page: ${allEventRows.length}`);
+            console.log(`📑 Events by page:`, pageGroups.map(pg => ({
+              title: pg.title,
+              eventCount: pg.events.length
+            })));
+
+            resolve({
+              newEvents: newEvents,
+              lastEventNumber: highestEventNumber,
+              totalEventsOnPage: allEventRows.length,
+              pages: pageGroups.map(pg => ({
+                title: pg.title,
+                events: pg.events
+              })),
+              debug: {
+                url: window.location.href,
+                title: document.title,
+                timestamp: Date.now(),
+                documentReady: document.readyState,
+                pageGroupsFound: pageGroups.length,
+                selectors: selectors.map(s => ({
+                  selector: s,
+                  count: document.querySelectorAll(s).length
+                }))
+              }
+            });
+          } catch (error) {
+            console.error("❌ Top-level error in GTM events extraction:", error);
+            resolve({
+              error: "Failed to extract events: " + error.message,
+              newEvents: [],
+              lastEventNumber: lastEventNumber,
+              pages: [],
+              debug: {
+                url: window.location.href,
+                title: document.title,
+                timestamp: Date.now(),
+                errorMessage: error.message,
+                errorStack: error.stack
+              }
+            });
+          }
+        });
+      },
+      args: [lastGtmEventNumber]
+    });
+
+    const gtmData = results[0]?.result;
+    
+    if (gtmData?.error) {
+      const errorResponse = {
+        type: "NEW_GTM_PREVIEW_EVENTS_RESPONSE",
+        requestId,
+        payload: { 
+          error: gtmData.error,
+          timestamp: Date.now()
+        },
+      };
+      
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify(errorResponse));
+      }
+      return;
+    }
+
+    // Update the last event number in storage if we found new events
+    if (gtmData?.lastEventNumber > lastGtmEventNumber) {
+      await chrome.storage.local.set({
+        [STORAGE_KEYS.LAST_EVENT_NUMBER]: gtmData.lastEventNumber
+      });
+      logInfo(`Updated last GTM event number to ${gtmData.lastEventNumber}`);
+    }
+
+    // Send successful response
+    const response = {
+      type: "NEW_GTM_PREVIEW_EVENTS_RESPONSE",
+      requestId,
+      payload: {
+        newEvents: gtmData?.newEvents || [],
+        metadata: {
+          tabId: tagAssistantTab.id,
+          tabTitle: tagAssistantTab.title,
+          tabUrl: tagAssistantTab.url,
+          timestamp: Date.now(),
+          newEventsCount: gtmData?.newEvents?.length || 0,
+          lastEventNumber: gtmData?.lastEventNumber || 0,
+          totalEventsOnPage: gtmData?.totalEventsOnPage || 0
+        }
+      },
+    };
+
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify(response));
+      logInfo(`New GTM preview events sent: ${response.payload.metadata.newEventsCount} new events`);
+    } else {
+      logError("Cannot send new GTM preview events response - WebSocket not connected");
+    }
+
+  } catch (error) {
+    logError(`Error in handleGetNewGtmPreviewEventsRequest: ${error.message}`);
+    
+    const errorResponse = {
+      type: "NEW_GTM_PREVIEW_EVENTS_RESPONSE",
+      requestId,
+      payload: { 
+        error: `Failed to extract new GTM preview events: ${error.message}`,
+        timestamp: Date.now()
+      },
+    };
+    
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify(errorResponse));
+    }
+  }
 }
 
 // Clean up on service worker shutdown

@@ -254,7 +254,6 @@ mcpServer.tool(
   async (): Promise<any> => {
     const socket = connectionState.socket;
     
-    // Enhanced connection checking
     if (!socket) {
       return {
         content: [
@@ -280,10 +279,6 @@ mcpServer.tool(
         isError: true,
       } as any;
     }
-    
-    if (!connectionState.isHealthy) {
-      logWarn("Attempting getGa4Hits on potentially unhealthy connection");
-    }
 
     const requestId = uuidv4();
     const payload = { type: "REQUEST_GA4_HITS", requestId, timestamp: Date.now() } as const;
@@ -304,7 +299,7 @@ mcpServer.tool(
     return new Promise<any>((resolve) => {
       const timeout = setTimeout(() => {
         cleanup();
-        logWarn(`Request ${requestId} timed out after ${CONNECTION_TIMEOUT}ms`);
+        logWarn(`GA4 hits request ${requestId} timed out after ${CONNECTION_TIMEOUT}ms`);
         resolve({
           content: [
             {
@@ -325,7 +320,7 @@ mcpServer.tool(
             connectionState.lastActivity = Date.now();
             
             if (msg.payload?.error) {
-              logWarn(`Request ${requestId} returned error:`, msg.payload.error);
+              logWarn(`GA4 hits request ${requestId} returned error:`, msg.payload.error);
               resolve({
                 content: [
                   { 
@@ -337,13 +332,13 @@ mcpServer.tool(
                 isError: true,
               } as any);
             } else {
-              logInfo(`Request ${requestId} completed successfully`);
+              logInfo(`GA4 hits request ${requestId} completed successfully`);
               resolve({
                 content: [
                   {
                     type: "text",
                     text: JSON.stringify(msg.payload, null, 2),
-                    _meta: { requestId, hitsCount: msg.payload?.totalHits || 0, pageUrl: msg.payload?.pageUrl }
+                    _meta: { requestId, hitsCount: Array.isArray(msg.payload?.hits) ? msg.payload.hits.length : 0 }
                   },
                 ],
               } as any);
@@ -356,7 +351,7 @@ mcpServer.tool(
 
       function handleClose() {
         cleanup();
-        logWarn(`WebSocket closed while waiting for request ${requestId}`);
+        logWarn(`WebSocket closed while waiting for GA4 hits request ${requestId}`);
         resolve({
           content: [
             { 
@@ -371,7 +366,7 @@ mcpServer.tool(
 
       function handleError(error: any) {
         cleanup();
-        logError(`WebSocket error while waiting for request ${requestId}:`, error);
+        logError(`WebSocket error while waiting for GA4 hits request ${requestId}:`, error);
         resolve({
           content: [
             { 
@@ -407,7 +402,6 @@ mcpServer.tool(
   async (): Promise<any> => {
     const socket = connectionState.socket;
     
-    // Enhanced connection checking
     if (!socket) {
       return {
         content: [
@@ -433,10 +427,6 @@ mcpServer.tool(
         isError: true,
       } as any;
     }
-    
-    if (!connectionState.isHealthy) {
-      logWarn("Attempting getMetaPixelHits on potentially unhealthy connection");
-    }
 
     const requestId = uuidv4();
     const payload = { type: "REQUEST_META_PIXEL_HITS", requestId, timestamp: Date.now() } as const;
@@ -457,7 +447,7 @@ mcpServer.tool(
     return new Promise<any>((resolve) => {
       const timeout = setTimeout(() => {
         cleanup();
-        logWarn(`Request ${requestId} timed out after ${CONNECTION_TIMEOUT}ms`);
+        logWarn(`Meta Pixel hits request ${requestId} timed out after ${CONNECTION_TIMEOUT}ms`);
         resolve({
           content: [
             {
@@ -478,7 +468,7 @@ mcpServer.tool(
             connectionState.lastActivity = Date.now();
             
             if (msg.payload?.error) {
-              logWarn(`Request ${requestId} returned error:`, msg.payload.error);
+              logWarn(`Meta Pixel hits request ${requestId} returned error:`, msg.payload.error);
               resolve({
                 content: [
                   { 
@@ -490,13 +480,13 @@ mcpServer.tool(
                 isError: true,
               } as any);
             } else {
-              logInfo(`Request ${requestId} completed successfully`);
+              logInfo(`Meta Pixel hits request ${requestId} completed successfully`);
               resolve({
                 content: [
                   {
                     type: "text",
                     text: JSON.stringify(msg.payload, null, 2),
-                    _meta: { requestId, hitsCount: msg.payload?.totalHits || 0, pageUrl: msg.payload?.pageUrl }
+                    _meta: { requestId, hitsCount: Array.isArray(msg.payload?.hits) ? msg.payload.hits.length : 0 }
                   },
                 ],
               } as any);
@@ -509,7 +499,7 @@ mcpServer.tool(
 
       function handleClose() {
         cleanup();
-        logWarn(`WebSocket closed while waiting for request ${requestId}`);
+        logWarn(`WebSocket closed while waiting for Meta Pixel hits request ${requestId}`);
         resolve({
           content: [
             { 
@@ -524,7 +514,162 @@ mcpServer.tool(
 
       function handleError(error: any) {
         cleanup();
-        logError(`WebSocket error while waiting for request ${requestId}:`, error);
+        logError(`WebSocket error while waiting for Meta Pixel hits request ${requestId}:`, error);
+        resolve({
+          content: [
+            { 
+              type: "text", 
+              text: "Extension connection error while processing request.", 
+              _meta: { isError: true, requestId, connectionState: "error" } 
+            },
+          ],
+          isError: true,
+        } as any);
+      }
+
+      function cleanup() {
+        clearTimeout(timeout);
+        if (socket) {
+          socket.off("message", handleMessage);
+          socket.off("close", handleClose);
+          socket.off("error", handleError);
+        }
+      }
+
+      socket.on("message", handleMessage);
+      socket.on("close", handleClose);
+      socket.on("error", handleError);
+    });
+  },
+);
+
+mcpServer.tool(
+  "getNewGTMPreviewEvents",
+  "Get new GTM preview events from Google Tag Assistant that have occurred since the last call. Returns events with numbers greater than the last reported event.",
+  {},
+  async (): Promise<any> => {
+    const socket = connectionState.socket;
+    
+    if (!socket) {
+      return {
+        content: [
+          { 
+            type: "text", 
+            text: "Chrome extension is not connected. Please ensure the extension is installed and a tab is attached.",
+            _meta: { isError: true, connectionState: "no_socket" }
+          },
+        ],
+        isError: true,
+      } as any;
+    }
+    
+    if (socket.readyState !== WebSocket.OPEN) {
+      return {
+        content: [
+          { 
+            type: "text", 
+            text: `Chrome extension connection is not ready (state: ${socket.readyState}). Please try again in a moment.`,
+            _meta: { isError: true, connectionState: "not_open" }
+          },
+        ],
+        isError: true,
+      } as any;
+    }
+
+    const requestId = uuidv4();
+    const payload = { type: "REQUEST_NEW_GTM_PREVIEW_EVENTS", requestId, timestamp: Date.now() } as const;
+    
+    if (!wsSend(socket, payload)) {
+      return {
+        content: [
+          { 
+            type: "text", 
+            text: "Failed to send request to extension. Connection may be unstable.",
+            _meta: { isError: true, connectionState: "send_failed" }
+          },
+        ],
+        isError: true,
+      } as any;
+    }
+
+    return new Promise<any>((resolve) => {
+      const timeout = setTimeout(() => {
+        cleanup();
+        logWarn(`GTM preview request ${requestId} timed out after ${CONNECTION_TIMEOUT}ms`);
+        resolve({
+          content: [
+            {
+              type: "text",
+              text: `Timeout waiting for GTM preview data from extension (${CONNECTION_TIMEOUT}ms). Make sure the attached tab is on Tag Assistant with GTM preview active.`,
+              _meta: { isError: true, requestId, connectionState: "timeout" },
+            },
+          ],
+          isError: true,
+        } as any);
+      }, CONNECTION_TIMEOUT);
+
+      function handleMessage(data: RawData) {
+        try {
+          const msg = JSON.parse(data.toString());
+          if (msg.type === "NEW_GTM_PREVIEW_EVENTS_RESPONSE" && msg.requestId === requestId) {
+            cleanup();
+            connectionState.lastActivity = Date.now();
+            
+            if (msg.payload?.error) {
+              logWarn(`GTM preview request ${requestId} returned error:`, msg.payload.error);
+              resolve({
+                content: [
+                  { 
+                    type: "text", 
+                    text: String(msg.payload.error), 
+                    _meta: { isError: true, requestId } 
+                  },
+                ],
+                isError: true,
+              } as any);
+            } else {
+              logInfo(`GTM preview request ${requestId} completed successfully`);
+              const events = msg.payload?.events || [];
+              resolve({
+                content: [
+                  {
+                    type: "text",
+                    text: JSON.stringify(msg.payload, null, 2),
+                    _meta: { 
+                      requestId, 
+                      totalEvents: msg.payload?.totalEvents || 0,
+                      newEvents: msg.payload?.newEvents || 0,
+                      cached: msg.payload?.cached || false,
+                      eventsCount: events.length
+                    }
+                  },
+                ],
+              } as any);
+            }
+          }
+        } catch (err) {
+          logWarn("Received malformed JSON message:", err);
+        }
+      }
+
+      function handleClose() {
+        cleanup();
+        logWarn(`WebSocket closed while waiting for GTM preview request ${requestId}`);
+        resolve({
+          content: [
+            { 
+              type: "text", 
+              text: "Extension connection closed while processing request.", 
+              _meta: { isError: true, requestId, connectionState: "closed" } 
+            },
+          ],
+          isError: true,
+        } as any);
+      }
+
+      function handleError(error: any) {
+        cleanup();
+        logError(`WebSocket error while waiting for GTM preview request ${requestId}:`, error);
         resolve({
           content: [
             { 

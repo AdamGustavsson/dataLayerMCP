@@ -135,6 +135,49 @@ Track progress by checking items as they are completed.
 - [ ] Add Meta Pixel specific logging and debugging
 - [ ] Create comprehensive test suite for various Meta Pixel scenarios
 
+## GTM Preview Data Tool
+### Phase 1: Server-Side Implementation
+- [x] Add GTM preview tool registration to MCP server (`server/src/index.ts`)
+- [x] Add GTM preview message type constants (`REQUEST_GTM_PREVIEW`, `GTM_PREVIEW_RESPONSE`)
+- [x] Implement GTM preview hits request logic (similar to getDataLayer)
+- [x] Add GTM preview response handler in WebSocket message handler
+- [x] **REFACTORED**: Renamed to `getNewGTMPreviewEvents` with `REQUEST_NEW_GTM_PREVIEW_EVENTS` message type
+- [x] **REFACTORED**: Updated response handler to use `NEW_GTM_PREVIEW_EVENTS_RESPONSE`
+
+### Phase 2: Chrome Extension Backend
+- [x] Add Tag Assistant domain permissions to manifest.json (`tagassistant.google.com`)
+- [x] Add GTM preview request handler case in message switch statement
+- [x] Implement handleGetGtmPreviewRequest function
+- [x] Modified to automatically find and use Tag Assistant tabs instead of requiring tab attachment
+- [x] Implemented chrome.tabs.query to search for tagassistant.google.com tabs
+- [x] Keep other tools (getDataLayer, etc.) working from attached tab as usual
+- [x] **REFACTORED**: Renamed to `handleGetNewGtmPreviewEventsRequest` function
+- [x] **REFACTORED**: Updated message types to use `REQUEST_NEW_GTM_PREVIEW_EVENTS` and `NEW_GTM_PREVIEW_EVENTS_RESPONSE`
+
+### Phase 3: GTM Data Scraping - SIMPLIFIED APPROACH
+- [x] **REMOVED**: localStorage caching system (too complex, caused duplicates)
+- [x] **NEW**: Global `lastReportedEventNumber` tracking per session
+- [x] **NEW**: Only return events with numbers > last reported event number
+- [x] **NEW**: Session-based tracking (resets when service worker restarts)
+- [x] Simplified tag extraction (basic check for "None" vs actual tag names)
+- [x] Removed incremental caching and duplicate detection complexity
+- [x] Add event numbering and timestamp tracking
+- [x] **IMPROVED**: Much faster execution, no localStorage I/O
+
+### Phase 4: Data Format and Response
+- [x] **SIMPLIFIED**: Structure response as `{ newEvents: [], metadata: {} }`
+- [x] **UPDATED**: Metadata includes `newEventsCount`, `lastEventNumber`, `totalEventsOnPage`
+- [x] **REMOVED**: Cache status and complex event processing metadata
+- [x] **IMPROVED**: Clear indication of only NEW events since last call
+
+### Phase 5: Testing and Documentation
+- [x] Update README.md with new tool name and behavior documentation
+- [x] Update usage instructions to clarify NEW events behavior
+- [x] Update Cursor tools list with correct tool name
+- [x] **COMPLETED**: Document that tool tracks event numbers per session (no persistence)
+- [ ] Test new GTM preview events extraction with real Tag Assistant sessions
+- [ ] Verify session-based tracking works correctly across multiple calls
+
 ## Testing & Validation
 - [ ] Manual test end-to-end flow retrieving dataLayer from a site
 - [x] Add `npm` script to build & reload extension in Chrome for dev (server dev & extension manual reload)
