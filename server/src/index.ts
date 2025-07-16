@@ -545,7 +545,7 @@ mcpServer.tool(
 
 mcpServer.tool(
   "getNewGTMPreviewEvents",
-  "Get new GTM preview events from Google Tag Assistant that have occurred since the last call. Returns events with numbers greater than the last reported event.",
+  "Get new GTM preview events from Google Tag Assistant that have occurred since the last call. Returns events with numbers greater than the last reported event. (Requires that a GTM preview is active in the human's browser)",
   {},
   async (): Promise<any> => {
     const socket = connectionState.socket;

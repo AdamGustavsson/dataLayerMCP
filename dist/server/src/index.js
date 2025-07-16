@@ -475,7 +475,7 @@ mcpServer.tool("getMetaPixelHits", "Get all Meta Pixel (Facebook Pixel) hits rec
         socket.on("error", handleError);
     });
 });
-mcpServer.tool("getNewGTMPreviewEvents", "Get new GTM preview events from Google Tag Assistant that have occurred since the last call. Returns events with numbers greater than the last reported event.", {}, async () => {
+mcpServer.tool("getNewGTMPreviewEvents", "Get new GTM preview events from Google Tag Assistant that have occurred since the last call. Returns events with numbers greater than the last reported event. (Requires that a GTM preview is active in the human's browser)", {}, async () => {
     const socket = connectionState.socket;
     if (!socket) {
         return {
