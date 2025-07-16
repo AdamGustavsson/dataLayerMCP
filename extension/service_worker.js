@@ -165,6 +165,9 @@ async function connectWebSocket() {
         case "REQUEST_NEW_GTM_PREVIEW_EVENTS":
           await handleGetNewGtmPreviewEventsRequest(msg.requestId);
           break;
+        case "REQUEST_GTM_CONTAINER_IDS":
+          await handleGetGtmContainerIdsRequest(msg.requestId);
+          break;
         case "KEEPALIVE_PONG":
           logInfo("Received keepalive pong");
           break;
@@ -323,6 +326,49 @@ function extractDataLayer() {
   }
 }
 
+// Enhanced GTM container ID extraction
+function extractGtmContainerIds() {
+  try {
+    const start = performance.now();
+    
+    // Check if Google Tag Manager is available
+    if (!window.google_tag_manager) {
+      return { 
+        error: "Google Tag Manager not found on this page. Make sure GTM is installed and loaded.", 
+        url: window.location.href,
+        timestamp: Date.now()
+      };
+    }
+    
+    // Extract container IDs from google_tag_manager object
+    const gtmIds = Object.keys(window.google_tag_manager)
+      .filter(id => id.startsWith('GTM-'));
+    
+    const end = performance.now();
+    
+    if (gtmIds.length === 0) {
+      return {
+        error: "No GTM container IDs found. The google_tag_manager object exists but contains no GTM containers.",
+        url: window.location.href,
+        timestamp: Date.now(),
+        availableKeys: Object.keys(window.google_tag_manager)
+      };
+    }
+    
+    return {
+      containerIds: gtmIds,
+      url: window.location.href,
+      timestamp: Date.now()
+    };
+  } catch (e) {
+    return { 
+      error: `Failed to extract GTM container IDs: ${e.message}`, 
+      url: window.location.href,
+      timestamp: Date.now()
+    };
+  }
+}
+
 async function handleGetDataLayerRequest(requestId) {
   logInfo(`Handling dataLayer request: ${requestId}`);
   
@@ -379,6 +425,77 @@ async function handleGetDataLayerRequest(requestId) {
     
     const errorResponse = {
       type: "DATALAYER_RESPONSE",
+      requestId,
+      payload: { 
+        error: `Failed to execute script: ${e.message}`,
+        timestamp: Date.now()
+      },
+    };
+    
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify(errorResponse));
+    } else {
+      logError("Cannot send error response - WebSocket not connected");
+    }
+  }
+}
+
+async function handleGetGtmContainerIdsRequest(requestId) {
+  logInfo(`Handling GTM container IDs request: ${requestId}`);
+  
+  const { attachedTabId } = await chrome.storage.local.get(STORAGE_KEYS.TAB_ID);
+  
+  if (!attachedTabId) {
+    const errorResponse = {
+      type: "GTM_CONTAINER_IDS_RESPONSE",
+      requestId,
+      payload: { 
+        error: "No tab attached. Ask the human to attach a tab by opening the extension and clicking the attach button.",
+        timestamp: Date.now()
+      },
+    };
+    
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify(errorResponse));
+    } else {
+      logError("Cannot send error response - WebSocket not connected");
+    }
+    return;
+  }
+
+  try {
+    // Check if tab still exists
+    const tab = await chrome.tabs.get(attachedTabId).catch(() => null);
+    if (!tab) {
+      throw new Error("Attached tab no longer exists");
+    }
+    
+    const [result] = await chrome.scripting.executeScript({
+      target: { tabId: attachedTabId },
+      func: extractGtmContainerIds,
+      world: "MAIN",
+    });
+
+    const response = {
+      type: "GTM_CONTAINER_IDS_RESPONSE",
+      requestId,
+      payload: result.result,
+    };
+    
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify(response));
+      logInfo(`Successfully sent GTM container IDs response for request: ${requestId}`);
+    } else {
+      logError("Cannot send response - WebSocket not connected");
+      // Try to reconnect
+      attemptReconnect();
+    }
+    
+  } catch (e) {
+    logError(`Failed to execute GTM container IDs script:`, e);
+    
+    const errorResponse = {
+      type: "GTM_CONTAINER_IDS_RESPONSE",
       requestId,
       payload: { 
         error: `Failed to execute script: ${e.message}`,
