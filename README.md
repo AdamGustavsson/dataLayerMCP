@@ -5,11 +5,12 @@ This repository contains an MVP implementation that lets a Large Language Model 
 Components
 -----------
 
-1. **MCP Server (Node + TypeScript)** – local process exposing four MCP tools:
+1. **MCP Server (Node + TypeScript)** – local process exposing five MCP tools:
    - `getDataLayer()` – captures the current contents of `window.dataLayer`
    - `getGa4Hits()` – returns all GA4 tracking events recorded from the current page (includes both direct Google Analytics requests and server-side tracking)
    - `getMetaPixelHits()` – returns all Meta Pixel (Facebook Pixel) tracking events recorded from the current page (includes both direct Facebook requests and server-side tracking)
    - `getNewGTMPreviewEvents()` – returns NEW GTM preview events from Google Tag Assistant (events with numbers greater than the last call)
+   - `getSchemaMarkup()` – extracts and returns all schema markup (JSON-LD and microdata) found on the current page
    
    Communicates with the Chrome extension via WebSocket (`ws://localhost:57321`).
 
@@ -18,6 +19,7 @@ Components
    - Automatic monitoring and recording of GA4 network requests
    - Automatic monitoring and recording of Meta Pixel network requests
    - GTM preview data scraping from Google Tag Assistant (when attached tab is on tagassistant.google.com)
+   - Schema markup extraction (JSON-LD and microdata) from any webpage
 
 Quick start
 -----------
@@ -78,7 +80,16 @@ Manual end-to-end test
    ```
    The tool returns only NEW events since the last call (tracks event numbers internally). First call returns all events, subsequent calls return only newer events. No caching - session-based tracking only.
 
-6. **Observe logs**  
+6. **Test schema markup extraction**
+   • Navigate to any page with structured data (JSON-LD or microdata schema markup), or use the included test file: `file:///path/to/dataLayerMCP/test-schema.html`
+   • Attach the extension to the tab with schema markup
+   • Run the schema markup tool:
+   ```bash
+   echo '{ "tool": "getSchemaMarkup", "args": {} }' | npm run start
+   ```
+   The server should output all JSON-LD scripts and microdata elements found on the page, with parsed structured data for SEO and rich snippets analysis.
+
+7. **Observe logs**  
    • Server console will show request / response and WebSocket connection messages.  
    • Extension's background service-worker logs can be viewed in `chrome://extensions/` → *Service Worker* → **Inspect**.
 
@@ -142,7 +153,7 @@ For example:
 - **macOS/Linux**: `"/Users/yourname/Documents/code/dataLayerMCP/dist/server/src/index.js"`
 - **Windows**: `"C:\\Users\\yourname\\Documents\\code\\dataLayerMCP\\dist\\server\\src\\index.js"`
 
-Save the configuration, then **restart Cursor**. The server will be globally available across all projects, and tools named `mcp_dataLayerMCP_getDataLayer`, `mcp_dataLayerMCP_getGa4Hits`, `mcp_dataLayerMCP_getMetaPixelHits`, and `mcp_dataLayerMCP_getNewGTMPreviewEvents` will appear in the tool list for any chat session.
+Save the configuration, then **restart Cursor**. The server will be globally available across all projects, and tools named `mcp_dataLayerMCP_getDataLayer`, `mcp_dataLayerMCP_getGa4Hits`, `mcp_dataLayerMCP_getMetaPixelHits`, `mcp_dataLayerMCP_getNewGTMPreviewEvents`, and `mcp_dataLayerMCP_getSchemaMarkup` will appear in the tool list for any chat session.
 
 #### b) VS Code + GitHub Copilot Chat (`.vscode/mcp.json`)
 
@@ -172,6 +183,7 @@ VS Code will show a **Start** code-lens at the top of the JSON — click it to l
    - **GA4 Hits**: "Show me the GA4 hits" or "What GA4 events have been recorded?"
    - **Meta Pixel Hits**: "Show me the Meta Pixel hits" or "What Facebook Pixel events have been fired?"
    - **GTM Preview**: "Get new GTM events" or "What new events have occurred in Tag Assistant?"
+   - **Schema Markup**: "Extract schema markup from this page" or "What structured data is on this page?"
 3. Make sure the Chrome extension is attached to the tab you want to inspect — the JSON response will appear in Chat.
 
 **Available Tools:**
@@ -179,9 +191,10 @@ VS Code will show a **Start** code-lens at the top of the JSON — click it to l
 - `getGa4Hits` - Returns array of GA4 tracking events from **attached tab** (resets on page navigation)
 - `getMetaPixelHits` - Returns array of Meta Pixel tracking events from **attached tab** (resets on page navigation)  
 - `getNewGTMPreviewEvents` - Returns NEW events from any open **Tag Assistant tab** (tracks last event number, no caching)
+- `getSchemaMarkup` - Extracts all JSON-LD and microdata schema markup from **attached tab** for SEO analysis
 
-**Pro tip**: Combine with BrowserMCP to have the agent control the page by clicking around and check the dataLayer changes, GA4 events, Meta Pixel events, and GTM preview data being updated!
+**Pro tip**: Combine with BrowserMCP to have the agent control the page by clicking around and check the dataLayer changes, GA4 events, Meta Pixel events, GTM preview data, and schema markup being updated!
 
-That's it — you now have global, one-click, LLM-accessible access to any page's `window.dataLayer`, GA4 tracking events, Meta Pixel tracking events, and GTM preview data from any Cursor project!
+That's it — you now have global, one-click, LLM-accessible access to any page's `window.dataLayer`, GA4 tracking events, Meta Pixel tracking events, GTM preview data, and schema markup from any Cursor project!
 
-This MCP server includes a Chrome extension that communicates with the server, extracts `window.dataLayer` from the browser, monitors GA4 and Meta Pixel network requests, scrapes GTM preview data from Tag Assistant, and forwards all data to the MCP server for AI access. The extension communicates with the server via WebSocket (`ws://localhost:57321`).
+This MCP server includes a Chrome extension that communicates with the server, extracts `window.dataLayer` from the browser, monitors GA4 and Meta Pixel network requests, scrapes GTM preview data from Tag Assistant, extracts schema markup (JSON-LD and microdata), and forwards all data to the MCP server for AI access. The extension communicates with the server via WebSocket (`ws://localhost:57321`).
