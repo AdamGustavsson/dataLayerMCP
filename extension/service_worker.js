@@ -1320,11 +1320,9 @@ async function extractNewGtmPreviewEvents() {
                   const tagElements = firedTagsSection.querySelectorAll('*');
                   tagElements.forEach((el) => {
                     const text = el.textContent?.trim();
-                    if (text && text.length > 3 && text.length < 80 &&
-                        !text.includes('Tags fired') && !text.includes('None') &&
-                        !text.includes('No tags') && text !== sectionText &&
-                        (text.includes('GA4') || text.includes('Google') || text.includes('Analytics') ||
-                         text.includes('Tag') || text.includes('Conversion') || text.includes('Pixel'))) {
+                    if (text && text.length > 1 && text.length < 200 &&
+                        text !== 'Tags fired' && text !== 'None' &&
+                        text !== 'No tags' && text !== sectionText) {
                       if (!tagsFired.includes(text)) {
                         tagsFired.push(text);
                         console.log(`  🏷️ Found tag: "${text}"`);
@@ -1672,11 +1670,9 @@ async function handleGetNewGtmPreviewEventsRequest(requestId) {
                           const tagElements = firedTagsSection.querySelectorAll('*');
                           tagElements.forEach((el) => {
                             const text = el.textContent?.trim();
-                            if (text && text.length > 3 && text.length < 80 &&
-                                !text.includes('Tags fired') && !text.includes('None') &&
-                                !text.includes('No tags') && text !== sectionText &&
-                                (text.includes('GA4') || text.includes('Google') || text.includes('Analytics') ||
-                                 text.includes('Tag') || text.includes('Conversion') || text.includes('Pixel'))) {
+                            if (text && text.length > 1 && text.length < 200 &&
+                                text !== 'Tags fired' && text !== 'None' &&
+                                text !== 'No tags' && text !== sectionText) {
                               if (!tagsFired.includes(text)) {
                                 tagsFired.push(text);
                               }
