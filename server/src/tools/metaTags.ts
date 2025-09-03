@@ -9,7 +9,7 @@ import { amIActiveInstance, getInstanceInfo } from "../utils/instance.js";
 export function registerMetaTagsTool(mcpServer: any) {
   mcpServer.tool(
     "getMetaTags",
-    "Extract and return all meta tags from the current page including title, meta description, Open Graph, Twitter Card, and other SEO-related meta information.",
+    "Extract and return all meta tags from the human's attached browser tab via the connected extension, including title, meta description, Open Graph, Twitter Card, and other SEO-related meta information.",
     {},
     async (): Promise<any> => {
       if (!amIActiveInstance()) {

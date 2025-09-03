@@ -5,7 +5,7 @@ import { connectionState, wsSend } from "../connection/websocket.js";
 import { logError, logInfo, logWarn } from "../utils/logging.js";
 import { amIActiveInstance, getInstanceInfo } from "../utils/instance.js";
 export function registerGtmContainerIdsTool(mcpServer) {
-    mcpServer.tool("getGTMContainerIds", "Extract and return all (normally just one) Google Tag Manager container IDs installed on the current page from the window.google_tag_manager object.", {}, async () => {
+    mcpServer.tool("getGTMContainerIds", "Extract and return all (normally just one) Google Tag Manager container IDs installed on the current page from the human's attached browser tab via the connected extension, using the window.google_tag_manager object.", {}, async () => {
         if (!amIActiveInstance()) {
             const info = getInstanceInfo();
             return {

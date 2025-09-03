@@ -9,7 +9,7 @@ import { amIActiveInstance, getInstanceInfo } from "../utils/instance.js";
 export function registerGa4HitsTool(mcpServer: any) {
   mcpServer.tool(
     "getGa4Hits",
-    "Get all GA4 hits (network requests) recorded from the current page. Recording is automatic and resets on page navigation.",
+    "Get all GA4 hits (network requests) recorded from the human's attached browser tab via the connected extension. Recording is automatic and resets on page navigation.",
     {},
     async (): Promise<any> => {
       if (!amIActiveInstance()) {

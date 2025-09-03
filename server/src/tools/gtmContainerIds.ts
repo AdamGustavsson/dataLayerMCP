@@ -9,7 +9,7 @@ import { amIActiveInstance, getInstanceInfo } from "../utils/instance.js";
 export function registerGtmContainerIdsTool(mcpServer: any) {
   mcpServer.tool(
     "getGTMContainerIds",
-    "Extract and return all (normally just one) Google Tag Manager container IDs installed on the current page from the window.google_tag_manager object.",
+    "Extract and return all (normally just one) Google Tag Manager container IDs installed on the current page from the human's attached browser tab via the connected extension, using the window.google_tag_manager object.",
     {},
     async (): Promise<any> => {
       if (!amIActiveInstance()) {

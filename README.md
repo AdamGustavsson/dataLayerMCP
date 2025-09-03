@@ -204,6 +204,8 @@ VS Code will show a **Start** code-lens at the top of the JSON — click it to l
    - **Meta Tags**: "What are the meta tags on this page?" or "Show me the SEO metadata"
 3. Make sure the Chrome extension is attached to the tab you want to inspect — the JSON response will appear in Chat.
 
+All tools connect to your browser via the extension and fetch data from your attached (active) tab.
+
 **Available Tools:**
 - `getDataLayer` - Captures current `window.dataLayer` contents from **attached tab**
 - `getGa4Hits` - Returns array of GA4 tracking events from **attached tab** (resets on page navigation)

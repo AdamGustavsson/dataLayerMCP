@@ -5,7 +5,7 @@ import { connectionState, wsSend } from "../connection/websocket.js";
 import { logError } from "../utils/logging.js";
 import { amIActiveInstance, getInstanceInfo } from "../utils/instance.js";
 export function registerMetaTagsTool(mcpServer) {
-    mcpServer.tool("getMetaTags", "Extract and return all meta tags from the current page including title, meta description, Open Graph, Twitter Card, and other SEO-related meta information.", {}, async () => {
+    mcpServer.tool("getMetaTags", "Extract and return all meta tags from the human's attached browser tab via the connected extension, including title, meta description, Open Graph, Twitter Card, and other SEO-related meta information.", {}, async () => {
         if (!amIActiveInstance()) {
             const info = getInstanceInfo();
             throw new Error(`This server instance is not active (instanceId=${info.instanceId}). A newer instance likely took over. Please use the latest server instance.`);

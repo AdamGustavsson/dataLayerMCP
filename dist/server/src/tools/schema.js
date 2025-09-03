@@ -5,7 +5,7 @@ import { connectionState, wsSend } from "../connection/websocket.js";
 import { logError } from "../utils/logging.js";
 import { amIActiveInstance, getInstanceInfo } from "../utils/instance.js";
 export function registerSchemaMarkupTool(mcpServer) {
-    mcpServer.tool("getSchemaMarkup", "Extract and return all schema markup (JSON-LD and microdata) found on the current page, including structured data for SEO and rich snippets.", {}, async () => {
+    mcpServer.tool("getSchemaMarkup", "Extract and return all schema markup (JSON-LD and microdata) from the human's attached browser tab via the connected extension, including structured data for SEO and rich snippets.", {}, async () => {
         if (!amIActiveInstance()) {
             const info = getInstanceInfo();
             throw new Error(`This server instance is not active (instanceId=${info.instanceId}). A newer instance likely took over. Please use the latest server instance.`);

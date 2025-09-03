@@ -5,7 +5,7 @@ import { connectionState, wsSend } from "../connection/websocket.js";
 import { logError } from "../utils/logging.js";
 import { amIActiveInstance, getInstanceInfo } from "../utils/instance.js";
 export function registerCrawlabilityTool(mcpServer) {
-    mcpServer.tool("checkCrawlability", "Audit the current page for crawlability: meta robots, X-Robots-Tag headers, robots.txt sitemaps, and whether the page appears in a sitemap.", {}, async () => {
+    mcpServer.tool("checkCrawlability", "Audit the current page in the human's attached browser tab via the connected extension: meta robots, X-Robots-Tag headers, robots.txt sitemaps, and whether the page appears in a sitemap.", {}, async () => {
         if (!amIActiveInstance()) {
             const info = getInstanceInfo();
             throw new Error(`This server instance is not active (instanceId=${info.instanceId}). A newer instance likely took over. Please use the latest server instance.`);

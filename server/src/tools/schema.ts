@@ -9,7 +9,7 @@ import { amIActiveInstance, getInstanceInfo } from "../utils/instance.js";
 export function registerSchemaMarkupTool(mcpServer: any) {
   mcpServer.tool(
     "getSchemaMarkup",
-    "Extract and return all schema markup (JSON-LD and microdata) found on the current page, including structured data for SEO and rich snippets.",
+    "Extract and return all schema markup (JSON-LD and microdata) from the human's attached browser tab via the connected extension, including structured data for SEO and rich snippets.",
     {},
     async (): Promise<any> => {
       if (!amIActiveInstance()) {

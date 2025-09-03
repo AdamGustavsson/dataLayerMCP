@@ -5,7 +5,7 @@ import { connectionState, wsSend } from "../connection/websocket.js";
 import { logError, logInfo, logWarn } from "../utils/logging.js";
 import { amIActiveInstance, getInstanceInfo } from "../utils/instance.js";
 export function registerGtmPreviewEventsTool(mcpServer) {
-    mcpServer.tool("getNewGTMPreviewEvents", "Get new GTM preview events from Google Tag Assistant that have occurred since the last call. Returns events with numbers greater than the last reported event. (Requires that a GTM preview is active in the human's browser)", {}, async () => {
+    mcpServer.tool("getNewGTMPreviewEvents", "Get new GTM preview events from Google Tag Assistant in the human's browser via the connected extension, since the last call. Returns events with numbers greater than the last reported event (requires an active GTM preview in the human's browser).", {}, async () => {
         if (!amIActiveInstance()) {
             const info = getInstanceInfo();
             return {

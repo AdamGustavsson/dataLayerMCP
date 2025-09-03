@@ -9,7 +9,7 @@ import { amIActiveInstance, getInstanceInfo } from "../utils/instance.js";
 export function registerMetaPixelHitsTool(mcpServer: any) {
   mcpServer.tool(
     "getMetaPixelHits",
-    "Get all Meta Pixel (Facebook Pixel) hits recorded from the current page. Recording is automatic and resets on page navigation.",
+    "Get all Meta Pixel (Facebook Pixel) hits recorded from the human's attached browser tab via the connected extension. Recording is automatic and resets on page navigation.",
     {},
     async (): Promise<any> => {
       if (!amIActiveInstance()) {

@@ -9,7 +9,7 @@ import { amIActiveInstance, getInstanceInfo } from "../utils/instance.js";
 export function registerGtmPreviewEventsTool(mcpServer: any) {
   mcpServer.tool(
     "getNewGTMPreviewEvents",
-    "Get new GTM preview events from Google Tag Assistant that have occurred since the last call. Returns events with numbers greater than the last reported event. (Requires that a GTM preview is active in the human's browser)",
+    "Get new GTM preview events from Google Tag Assistant in the human's browser via the connected extension, since the last call. Returns events with numbers greater than the last reported event (requires an active GTM preview in the human's browser).",
     {},
     async (): Promise<any> => {
       if (!amIActiveInstance()) {

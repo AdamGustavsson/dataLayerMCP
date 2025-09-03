@@ -5,7 +5,7 @@ import { connectionState, wsSend } from "../connection/websocket.js";
 import { logError } from "../utils/logging.js";
 import { amIActiveInstance, getInstanceInfo } from "../utils/instance.js";
 export function registerDataLayerTool(mcpServer) {
-    mcpServer.tool("getDataLayer", "Capture and return the full contents of window.dataLayer from the active browser tab, allowing inspection of all GTM events.", {}, async () => {
+    mcpServer.tool("getDataLayer", "Capture and return the full contents of window.dataLayer from the human's attached browser tab via the connected extension, allowing inspection of all GTM events.", {}, async () => {
         if (!amIActiveInstance()) {
             const info = getInstanceInfo();
             throw new Error(`This server instance is not active (instanceId=${info.instanceId}). A newer instance likely took over. Please use the latest server instance.`);

@@ -5,7 +5,7 @@ import { connectionState, wsSend } from "../connection/websocket.js";
 import { logError, logInfo, logWarn } from "../utils/logging.js";
 import { amIActiveInstance, getInstanceInfo } from "../utils/instance.js";
 export function registerGa4HitsTool(mcpServer) {
-    mcpServer.tool("getGa4Hits", "Get all GA4 hits (network requests) recorded from the current page. Recording is automatic and resets on page navigation.", {}, async () => {
+    mcpServer.tool("getGa4Hits", "Get all GA4 hits (network requests) recorded from the human's attached browser tab via the connected extension. Recording is automatic and resets on page navigation.", {}, async () => {
         if (!amIActiveInstance()) {
             const info = getInstanceInfo();
             return {
