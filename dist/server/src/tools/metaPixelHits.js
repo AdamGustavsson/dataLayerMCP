@@ -3,8 +3,21 @@ import { v4 as uuidv4 } from "uuid";
 import WebSocket from "ws";
 import { connectionState, wsSend } from "../connection/websocket.js";
 import { logError, logInfo, logWarn } from "../utils/logging.js";
+import { amIActiveInstance, getInstanceInfo } from "../utils/instance.js";
 export function registerMetaPixelHitsTool(mcpServer) {
     mcpServer.tool("getMetaPixelHits", "Get all Meta Pixel (Facebook Pixel) hits recorded from the current page. Recording is automatic and resets on page navigation.", {}, async () => {
+        if (!amIActiveInstance()) {
+            const info = getInstanceInfo();
+            return {
+                content: [
+                    {
+                        type: "text",
+                        text: `Inactive server instance (instanceId=${info.instanceId}). A newer instance took over. Use the latest server.`,
+                    },
+                ],
+                isError: true,
+            };
+        }
         const socket = connectionState.socket;
         if (!socket) {
             return {

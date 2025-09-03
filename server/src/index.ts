@@ -12,6 +12,7 @@ import { registerGa4HitsTool } from "./tools/ga4Hits.js";
 import { registerMetaPixelHitsTool } from "./tools/metaPixelHits.js";
 import { registerGtmContainerIdsTool } from "./tools/gtmContainerIds.js";
 import { registerGtmPreviewEventsTool } from "./tools/gtmPreviewEvents.js";
+import { registerCrawlabilityTool } from "./tools/crawlability.js";
 
 // Configuration
 const MCP_SERVER_NAME = "DataLayerAccessServer";
@@ -35,6 +36,7 @@ registerGa4HitsTool(mcpServer);
 registerMetaPixelHitsTool(mcpServer);
 registerGtmContainerIdsTool(mcpServer);
 registerGtmPreviewEventsTool(mcpServer);
+registerCrawlabilityTool(mcpServer);
 
 // WebSocket message handler
 function handleWebSocketMessage(socket: any, message: any) {
@@ -46,7 +48,7 @@ function handleWebSocketMessage(socket: any, message: any) {
 async function main() {
   try {
     // Start WebSocket server first
-    const wss = setupWebSocketServer(handleWebSocketMessage);
+    const wss = await setupWebSocketServer(handleWebSocketMessage);
     
     // Then start MCP server
     const transport = new StdioServerTransport();

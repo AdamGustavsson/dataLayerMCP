@@ -4,6 +4,7 @@ import { v4 as uuidv4 } from "uuid";
 import WebSocket from "ws";
 import { connectionState, wsSend } from "../connection/websocket.js";
 import { logError, logInfo, logWarn } from "../utils/logging.js";
+import { amIActiveInstance, getInstanceInfo } from "../utils/instance.js";
 
 export function registerGtmPreviewEventsTool(mcpServer: any) {
   mcpServer.tool(
@@ -11,6 +12,18 @@ export function registerGtmPreviewEventsTool(mcpServer: any) {
     "Get new GTM preview events from Google Tag Assistant that have occurred since the last call. Returns events with numbers greater than the last reported event. (Requires that a GTM preview is active in the human's browser)",
     {},
     async (): Promise<any> => {
+      if (!amIActiveInstance()) {
+        const info = getInstanceInfo();
+        return {
+          content: [
+            {
+              type: "text",
+              text: `Inactive server instance (instanceId=${info.instanceId}). A newer instance took over. Use the latest server.`,
+            },
+          ],
+          isError: true,
+        } as any;
+      }
       const socket = connectionState.socket;
       
       if (!socket) {
@@ -161,4 +174,3 @@ export function registerGtmPreviewEventsTool(mcpServer: any) {
     }
   );
 }
-

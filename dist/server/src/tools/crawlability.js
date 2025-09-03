@@ -1,11 +1,11 @@
-// metaTags.ts - Meta tags MCP tool
+// crawlability.ts - Crawlability Audit MCP tool
 import { v4 as uuidv4 } from "uuid";
 import WebSocket from "ws";
 import { connectionState, wsSend } from "../connection/websocket.js";
 import { logError } from "../utils/logging.js";
 import { amIActiveInstance, getInstanceInfo } from "../utils/instance.js";
-export function registerMetaTagsTool(mcpServer) {
-    mcpServer.tool("getMetaTags", "Extract and return all meta tags from the current page including title, meta description, Open Graph, Twitter Card, and other SEO-related meta information.", {}, async () => {
+export function registerCrawlabilityTool(mcpServer) {
+    mcpServer.tool("checkCrawlability", "Audit the current page for crawlability: meta robots, X-Robots-Tag headers, robots.txt sitemaps, and whether the page appears in a sitemap.", {}, async () => {
         if (!amIActiveInstance()) {
             const info = getInstanceInfo();
             throw new Error(`This server instance is not active (instanceId=${info.instanceId}). A newer instance likely took over. Please use the latest server instance.`);
@@ -16,7 +16,7 @@ export function registerMetaTagsTool(mcpServer) {
         }
         const requestId = uuidv4();
         const payload = {
-            type: "REQUEST_META_TAGS",
+            type: "REQUEST_CRAWLABILITY_AUDIT",
             requestId,
             timestamp: Date.now(),
         };
@@ -26,19 +26,14 @@ export function registerMetaTagsTool(mcpServer) {
         return new Promise((resolve) => {
             const timeout = setTimeout(() => {
                 resolve({
-                    content: [
-                        {
-                            type: "text",
-                            text: "Request timed out after 30 seconds",
-                        },
-                    ],
+                    content: [{ type: "text", text: "Request timed out after 30 seconds" }],
                     isError: true,
                 });
             }, 30000);
             const messageHandler = (data) => {
                 try {
                     const msg = JSON.parse(data.toString());
-                    if (msg.type === "META_TAGS_RESPONSE" && msg.requestId === requestId) {
+                    if (msg.type === "CRAWLABILITY_AUDIT_RESPONSE" && msg.requestId === requestId) {
                         clearTimeout(timeout);
                         socket.off("message", messageHandler);
                         if (msg.payload?.error) {

@@ -4,6 +4,7 @@ import { v4 as uuidv4 } from "uuid";
 import WebSocket from "ws";
 import { connectionState, wsSend } from "../connection/websocket.js";
 import { logError, logInfo, logWarn } from "../utils/logging.js";
+import { amIActiveInstance, getInstanceInfo } from "../utils/instance.js";
 
 export function registerGa4HitsTool(mcpServer: any) {
   mcpServer.tool(
@@ -11,6 +12,18 @@ export function registerGa4HitsTool(mcpServer: any) {
     "Get all GA4 hits (network requests) recorded from the current page. Recording is automatic and resets on page navigation.",
     {},
     async (): Promise<any> => {
+      if (!amIActiveInstance()) {
+        const info = getInstanceInfo();
+        return {
+          content: [
+            {
+              type: "text",
+              text: `Inactive server instance (instanceId=${info.instanceId}). A newer instance took over. Use the latest server.`,
+            },
+          ],
+          isError: true,
+        } as any;
+      }
       const socket = connectionState.socket;
       
       if (!socket) {
@@ -154,4 +167,3 @@ export function registerGa4HitsTool(mcpServer: any) {
     }
   );
 }
-

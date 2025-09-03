@@ -5,15 +5,21 @@ This repository contains an MVP implementation that lets a Large Language Model 
 Components
 -----------
 
-1. **MCP Server (Node + TypeScript)** – local process exposing six MCP tools:
+1. **MCP Server (Node + TypeScript)** – local process exposing seven MCP tools:
    - `getDataLayer()` – captures the current contents of `window.dataLayer`
    - `getGa4Hits()` – returns all GA4 tracking events recorded from the current page (includes both direct Google Analytics requests and server-side tracking)
    - `getMetaPixelHits()` – returns all Meta Pixel (Facebook Pixel) tracking events recorded from the current page (includes both direct Facebook requests and server-side tracking)
    - `getNewGTMPreviewEvents()` – returns NEW GTM preview events from Google Tag Assistant (events with numbers greater than the last call)
    - `getSchemaMarkup()` – extracts and returns all schema markup (JSON-LD and microdata) found on the current page
    - `getMetaTags()` – extracts and returns all meta tags including title, description, Open Graph, Twitter Card, and other SEO metadata
+   - `checkCrawlability()` – audits crawlability of the attached page (robots meta, X‑Robots‑Tag headers, robots.txt sitemaps, and sitemap inclusion)
    
    Communicates with the Chrome extension via WebSocket (`ws://localhost:57321`).
+   
+   Multi-instance safety: Only the most recently started server instance is allowed to
+   send or receive messages. The server writes an active-instance lock in the OS temp
+   directory and tags all WebSocket messages with a unique `serverInstanceId`. Older
+   instances detect loss of leadership and drop outbound messages with a clear error.
 
 2. **Chrome Extension (Manifest V3)** – lets the user attach/detach a tab and provides:
    - Access to the tab's `window.dataLayer` 
@@ -205,6 +211,7 @@ VS Code will show a **Start** code-lens at the top of the JSON — click it to l
 - `getNewGTMPreviewEvents` - Returns NEW events from any open **Tag Assistant tab** (tracks last event number, no caching)
 - `getSchemaMarkup` - Extracts all JSON-LD and microdata schema markup from **attached tab** for SEO analysis
 - `getMetaTags` - Extracts all meta tags including title, description, Open Graph, Twitter Card, and SEO metadata from **attached tab**
+- `checkCrawlability` - Audits crawlability of the **attached tab**: reports robots meta, X‑Robots‑Tag headers, robots.txt sitemap URLs, and whether the page appears in a discovered sitemap; includes a simple indexability verdict and reasons
 
 **Pro tip**: Combine with BrowserMCP to have the agent control the page by clicking around and check the dataLayer changes, GA4 events, Meta Pixel events, GTM preview data, schema markup, and meta tags being updated!
 

@@ -4,6 +4,7 @@ import { v4 as uuidv4 } from "uuid";
 import WebSocket from "ws";
 import { connectionState, wsSend } from "../connection/websocket.js";
 import { logError, logInfo, logWarn } from "../utils/logging.js";
+import { amIActiveInstance, getInstanceInfo } from "../utils/instance.js";
 
 export function registerGtmContainerIdsTool(mcpServer: any) {
   mcpServer.tool(
@@ -11,6 +12,18 @@ export function registerGtmContainerIdsTool(mcpServer: any) {
     "Extract and return all (normally just one) Google Tag Manager container IDs installed on the current page from the window.google_tag_manager object.",
     {},
     async (): Promise<any> => {
+      if (!amIActiveInstance()) {
+        const info = getInstanceInfo();
+        return {
+          content: [
+            {
+              type: "text",
+              text: `Inactive server instance (instanceId=${info.instanceId}). A newer instance took over. Use the latest server.`,
+            },
+          ],
+          isError: true,
+        } as any;
+      }
       const socket = connectionState.socket;
       
       if (!socket) {
@@ -161,4 +174,3 @@ export function registerGtmContainerIdsTool(mcpServer: any) {
     }
   );
 }
-

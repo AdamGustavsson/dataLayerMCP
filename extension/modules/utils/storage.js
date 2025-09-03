@@ -46,4 +46,3 @@ export async function removeStoredValue(key) {
     return false;
   }
 }
-

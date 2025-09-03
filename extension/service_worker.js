@@ -19,11 +19,21 @@ import { extractDataLayer } from './modules/extractors/dataLayer.js';
 import { extractSchemaMarkup } from './modules/extractors/schema.js';
 import { extractMetaTags } from './modules/extractors/metaTags.js';
 
+// Track the currently connected server identity
+let connectedServerId = null;
+let connectedServerStartedAt = null;
+
 // Helper function to send WebSocket message
 function sendWebSocketMessage(message) {
   const ws = getWebSocket();
   if (ws && ws.readyState === WebSocket.OPEN) {
-    ws.send(JSON.stringify(message));
+    // Tag outbound messages with the server identity we acknowledged
+    const payload = { 
+      ...message, 
+      _targetServerInstanceId: connectedServerId, 
+      _targetServerStartedAt: connectedServerStartedAt 
+    };
+    ws.send(JSON.stringify(payload));
     return true;
   }
   return false;
@@ -61,11 +71,20 @@ async function handleWebSocketMessage(event) {
     case "REQUEST_META_TAGS":
       await handleGetMetaTagsRequest(msg.requestId);
       break;
+    case "REQUEST_CRAWLABILITY_AUDIT":
+      await handleCrawlabilityAuditRequest(msg.requestId);
+      break;
     case "KEEPALIVE_PONG":
       logInfo("Received keepalive pong");
       break;
     case "CONNECTION_ACK":
       logInfo(`Server acknowledged connection (version: ${msg.serverVersion})`);
+      connectedServerId = msg.serverInstanceId || null;
+      connectedServerStartedAt = msg.serverStartedAt || null;
+      // Cache in storage for debugging/visibility
+      try {
+        await chrome.storage.local.set({ __activeServerInstanceId: connectedServerId, __activeServerStartedAt: connectedServerStartedAt });
+      } catch {}
       break;
     default:
       logWarn("Unknown message type:", msg.type);
@@ -304,6 +323,243 @@ async function handleGetMetaTagsRequest(requestId) {
     
     if (!sendWebSocketMessage(errorResponse)) {
       logError("Cannot send error response - WebSocket not connected");
+    }
+  }
+}
+
+// Crawlability audit: meta robots, headers (X-Robots-Tag), robots.txt/sitemaps
+async function handleCrawlabilityAuditRequest(requestId) {
+  logInfo(`Handling crawlability audit request: ${requestId}`);
+
+  try {
+    const { attachedTabId } = await chrome.storage.local.get(STORAGE_KEYS.TAB_ID);
+    if (!attachedTabId) {
+      const errorResponse = {
+        type: "CRAWLABILITY_AUDIT_RESPONSE",
+        requestId,
+        payload: {
+          error: "No tab attached. Attach a tab from the extension popup.",
+          timestamp: Date.now(),
+        },
+      };
+      if (!sendWebSocketMessage(errorResponse)) {
+        logError("Cannot send error response - WebSocket not connected");
+      }
+      return;
+    }
+
+    const tab = await chrome.tabs.get(attachedTabId).catch(() => null);
+    if (!tab || !tab.url) {
+      const errorResponse = {
+        type: "CRAWLABILITY_AUDIT_RESPONSE",
+        requestId,
+        payload: {
+          error: "Attached tab not found or has no URL",
+          timestamp: Date.now(),
+        },
+      };
+      if (!sendWebSocketMessage(errorResponse)) {
+        logError("Cannot send error response - WebSocket not connected");
+      }
+      return;
+    }
+
+    const pageUrl = tab.url;
+    const u = new URL(pageUrl);
+    const origin = u.origin;
+    const robotsUrl = `${origin}/robots.txt`;
+
+    // 1) Extract meta tags (including robots)
+    let meta = null;
+    try {
+      const [result] = await chrome.scripting.executeScript({
+        target: { tabId: attachedTabId },
+        func: () => {
+          try {
+            const robotsMeta = document.querySelector('meta[name="robots"]');
+            const canonical = document.querySelector('link[rel="canonical"]');
+            const title = document.title || null;
+            const descriptionMeta = document.querySelector('meta[name="description"]');
+            return {
+              title,
+              robots: robotsMeta ? robotsMeta.getAttribute('content') : null,
+              canonical: canonical ? canonical.getAttribute('href') : null,
+              metaDescription: descriptionMeta ? descriptionMeta.getAttribute('content') : null,
+              url: window.location.href,
+            };
+          } catch (e) {
+            return { error: e.message, url: window.location.href };
+          }
+        },
+        world: "MAIN",
+      });
+      meta = result?.result || null;
+    } catch (e) {
+      meta = { error: `Meta extraction failed: ${e?.message || e}` };
+    }
+
+    // 2) Fetch page headers (prefer HEAD; fallback to GET on non-2xx)
+    async function fetchHeaders(url) {
+      async function doFetch(method) {
+        try {
+          const res = await fetch(url, { method, redirect: 'follow', cache: 'no-store' });
+          const headers = {};
+          res.headers.forEach((v, k) => (headers[k.toLowerCase()] = v));
+          return { ok: res.ok, status: res.status, url: res.url, headers, method };
+        } catch (err) {
+          return { ok: false, error: String(err), method };
+        }
+      }
+
+      // Try HEAD first
+      const head = await doFetch('HEAD');
+      // Some servers return 404/405 for HEAD even when GET is 200
+      if (!head || !head.ok) {
+        const get = await doFetch('GET');
+        return get;
+      }
+      return head;
+    }
+
+    const headerInfo = await fetchHeaders(pageUrl);
+    const xRobots = headerInfo?.headers?.['x-robots-tag'] || null;
+    const contentType = headerInfo?.headers?.['content-type'] || null;
+
+    // 3) robots.txt → collect sitemap URLs
+    async function fetchText(url) {
+      try {
+        const res = await fetch(url, { redirect: 'follow', cache: 'no-store' });
+        const txt = await res.text();
+        return { status: res.status, url: res.url, text: txt };
+      } catch (e) {
+        return { error: String(e) };
+      }
+    }
+
+    const robotsTxt = await fetchText(robotsUrl);
+    let sitemapCandidates = [];
+    let robotsFound = false;
+    if (robotsTxt && robotsTxt.text) {
+      robotsFound = true;
+      const lines = robotsTxt.text.split(/\r?\n/);
+      for (const line of lines) {
+        const m = line.match(/^\s*Sitemap:\s*(.+)$/i);
+        if (m && m[1]) {
+          const loc = m[1].trim();
+          try {
+            const abs = new URL(loc, origin).toString();
+            sitemapCandidates.push(abs);
+          } catch {}
+        }
+      }
+    }
+    // Fallback default sitemap
+    const defaultSitemap = `${origin}/sitemap.xml`;
+    if (!sitemapCandidates.includes(defaultSitemap)) sitemapCandidates.push(defaultSitemap);
+
+    // 4) Search sitemaps for the page URL (basic depth up to 5 files)
+    function normalize(u) {
+      try {
+        const x = new URL(u);
+        // Drop trailing slash for compare
+        const noSlash = x.href.endsWith('/') ? x.href.slice(0, -1) : x.href;
+        return noSlash;
+      } catch {
+        return u;
+      }
+    }
+    const targetA = normalize(pageUrl);
+    const targetB = targetA.endsWith('/') ? targetA.slice(0, -1) : `${targetA}/`; // both variants
+
+    let sitemapFoundIn = null;
+    const checked = [];
+    for (const sm of sitemapCandidates.slice(0, 5)) {
+      const smResp = await fetchText(sm);
+      checked.push({ url: sm, status: smResp?.status || null });
+      const body = smResp?.text || '';
+      if (!body) continue;
+      if (body.includes(targetA) || body.includes(targetB)) {
+        sitemapFoundIn = sm;
+        break;
+      }
+      // If sitemapindex, try to pull first few child sitemaps
+      if (/\<sitemapindex[\s\S]*\<\/sitemapindex\>/i.test(body)) {
+        const locs = Array.from(body.matchAll(/<loc>([^<]+)<\/loc>/gi)).map((m) => m[1]).slice(0, 5);
+        for (const child of locs) {
+          let childUrl = child;
+          try { childUrl = new URL(child, origin).toString(); } catch {}
+          const childResp = await fetchText(childUrl);
+          checked.push({ url: childUrl, status: childResp?.status || null });
+          const childBody = childResp?.text || '';
+          if (childBody.includes(targetA) || childBody.includes(targetB)) {
+            sitemapFoundIn = childUrl;
+            break;
+          }
+        }
+        if (sitemapFoundIn) break;
+      }
+    }
+
+    // 5) Determine blocking signals
+    const reasons = [];
+    const robotsMetaStr = (meta && meta.robots) ? String(meta.robots).toLowerCase() : '';
+    const xRobotsStr = xRobots ? String(xRobots).toLowerCase() : '';
+    if (robotsMetaStr.includes('noindex') || robotsMetaStr.includes('none')) {
+      reasons.push('robots meta contains noindex/none');
+    }
+    if (xRobotsStr.includes('noindex') || xRobotsStr.includes('none')) {
+      reasons.push('X-Robots-Tag header contains noindex/none');
+    }
+
+    const verdict = {
+      isProbablyIndexable: reasons.length === 0,
+      reasons,
+    };
+
+    const payload = {
+      url: pageUrl,
+      meta: {
+        title: meta?.title || null,
+        robots: meta?.robots || null,
+        canonical: meta?.canonical || null,
+        metaDescription: meta?.metaDescription || null,
+      },
+      headers: {
+        status: headerInfo?.status || null,
+        finalUrl: headerInfo?.url || null,
+        contentType: contentType,
+        xRobotsTag: xRobots,
+        methodUsed: headerInfo?.method || null,
+      },
+      robotsTxt: {
+        url: robotsUrl,
+        fetched: robotsFound,
+        sitemapCandidates,
+      },
+      sitemap: {
+        checked,
+        included: !!sitemapFoundIn,
+        matchedSitemap: sitemapFoundIn,
+      },
+      verdict,
+      timestamp: Date.now(),
+    };
+
+    const response = { type: "CRAWLABILITY_AUDIT_RESPONSE", requestId, payload };
+    if (sendWebSocketMessage(response)) {
+      logInfo(`Successfully sent crawlability response for request: ${requestId}`);
+    } else {
+      logError("Cannot send crawlability response - WebSocket not connected");
+    }
+  } catch (e) {
+    logError('Crawlability audit failed:', e);
+    const response = {
+      type: "CRAWLABILITY_AUDIT_RESPONSE",
+      requestId,
+      payload: { error: `Crawlability audit failed: ${e?.message || e}`, timestamp: Date.now() },
+    };
+    if (!sendWebSocketMessage(response)) {
+      logError("Cannot send crawlability error response - WebSocket not connected");
     }
   }
 }

@@ -1,7 +1,11 @@
 // websocket.ts - WebSocket connection management for server
 
 import WebSocket, { WebSocketServer } from "ws";
+import net from "node:net";
+import os from "node:os";
+import { exec } from "node:child_process";
 import { logInfo, logWarn, logError } from "../utils/logging.js";
+import { amIActiveInstance, getInstanceInfo, initActiveInstance } from "../utils/instance.js";
 
 // Connection configuration
 export const WS_PORT = 57321;
@@ -27,13 +31,22 @@ export const connectionState: ConnectionState = {
 
 // WebSocket message sending utility
 export function wsSend(socket: WebSocket, payload: any): boolean {
+  // Drop messages if this server instance is no longer the active one
+  if (!amIActiveInstance()) {
+    logWarn("Dropping wsSend: server instance is not active (a newer instance took over)");
+    return false;
+  }
+
   if (!socket || socket.readyState !== WebSocket.OPEN) {
     logError("Cannot send message - WebSocket not connected");
     return false;
   }
 
   try {
-    socket.send(JSON.stringify(payload));
+    // Attach server identity for traceability
+    const ident = getInstanceInfo();
+    const message = { ...payload, _serverInstanceId: ident.instanceId, _serverStartedAt: ident.startedAt };
+    socket.send(JSON.stringify(message));
     connectionState.lastActivity = Date.now();
     return true;
   } catch (error) {
@@ -75,9 +88,84 @@ export function stopHealthCheck() {
 }
 
 // WebSocket server setup
-export function setupWebSocketServer(messageHandler: (socket: WebSocket, message: any) => void) {
+// --- Robust port handling helpers ---
+async function wait(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function isPortInUse(port: number): Promise<boolean> {
+  return new Promise((resolve) => {
+    const tester = net
+      .createServer()
+      .once("error", (err: any) => {
+        if (err && (err as any).code === "EADDRINUSE") {
+          resolve(true);
+        } else {
+          // Treat other errors as not-in-use for our purposes
+          resolve(false);
+        }
+      })
+      .once("listening", () => {
+        tester.close(() => resolve(false));
+      })
+      .listen(port, "127.0.0.1");
+  });
+}
+
+async function killProcessOnPort(port: number): Promise<void> {
+  return new Promise((resolve) => {
+    const platform = os.platform();
+
+    let cmd = "";
+    if (platform === "win32") {
+      // Find the PID(s) listening on the port and kill them
+      // Uses PowerShell for broader compatibility
+      cmd = `powershell -Command \"$p = Get-NetTCPConnection -LocalPort ${port} -State Listen -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess; if ($p) { $p | ForEach-Object { taskkill /PID $_ /F } }\"`;
+    } else {
+      // macOS/Linux: use lsof first, fallback to fuser
+      cmd = `bash -lc 'if command -v lsof >/dev/null 2>&1; then lsof -ti tcp:${port} | xargs -r kill -9; elif command -v fuser >/dev/null 2>&1; then fuser -k ${port}/tcp; fi'`;
+    }
+
+    if (!cmd) {
+      resolve();
+      return;
+    }
+
+    exec(cmd, (error, stdout, stderr) => {
+      if (error) {
+        logWarn(`killProcessOnPort(${port}) encountered an error`, error.message || error);
+      }
+      if (stdout && stdout.trim()) logInfo(`Killed processes on port ${port}: ${stdout.trim()}`);
+      if (stderr && stderr.trim()) logWarn(`killProcessOnPort stderr: ${stderr.trim()}`);
+      resolve();
+    });
+  });
+}
+
+async function ensurePortAvailable(port: number, maxWaitMs: number = 5000): Promise<void> {
+  // Attempt to free the port proactively
+  await killProcessOnPort(port);
+  const start = Date.now();
+  while (await isPortInUse(port)) {
+    if (Date.now() - start > maxWaitMs) {
+      logWarn(`Port ${port} still in use after ${maxWaitMs}ms; proceeding to attempt bind.`);
+      break;
+    }
+    await wait(100);
+  }
+}
+
+export async function setupWebSocketServer(
+  messageHandler: (socket: WebSocket, message: any) => void,
+  port: number = WS_PORT,
+) {
+  // Establish leadership marker for this instance
+  initActiveInstance();
+
+  await ensurePortAvailable(port);
+
   const wss = new WebSocketServer({
-    port: WS_PORT,
+    port,
     verifyClient: (info: any) => {
       const origin = info.origin;
       logInfo(`WebSocket connection attempt from origin: ${origin}`);
@@ -102,10 +190,13 @@ export function setupWebSocketServer(messageHandler: (socket: WebSocket, message
     connectionState.lastActivity = Date.now();
     connectionState.reconnectAttempts = 0;
 
-    // Send connection acknowledgment
+    // Send connection acknowledgment with server identity
+    const ident = getInstanceInfo();
     wsSend(socket, {
       type: "CONNECTION_ACK",
       serverVersion: "0.1.0",
+      serverInstanceId: ident.instanceId,
+      serverStartedAt: ident.startedAt,
       timestamp: Date.now(),
     });
 
@@ -150,7 +241,10 @@ export function setupWebSocketServer(messageHandler: (socket: WebSocket, message
   });
 
   startHealthCheck();
-  logInfo(`WebSocket server listening on port ${WS_PORT}`);
+  logInfo(`WebSocket server listening on port ${port}`);
 
   return wss;
 }
+
+// Optional alias for symmetry with other servers
+export const createWebSocketServer = setupWebSocketServer;
